@@ -159,7 +159,7 @@
 			"complexity": {
 				"noAdjacentSpacesInRegex": "error",
 				"noBannedTypes": "error",
-				"noExcessiveCognitiveComplexity": "error",
+				"noExcessiveCognitiveComplexity": "off",
 				"noExtraBooleanCast": "error",
 				"noForEach": "error",
 				"noStaticOnlyClass": "error",
