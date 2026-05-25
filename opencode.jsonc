@@ -351,5 +351,6 @@
 			},
 		},
 	},
+	"shell": "fish",
 	"username": "zed-knip",
 }

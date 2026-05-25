@@ -23,7 +23,6 @@ import type {
 	ShorthandReplacement,
 } from "./types";
 
-const WORD_BOUNDARY_REGEX = /(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=[a-zA-Z])/u;
 const SPECIAL_CHARACTER_REGEX = /[.+^${}()|[\]\\]/gu;
 const REGEX_PATTERN_MATCHER = regex("^/(?<first>.+)/(?<second>[gimsuy]*)$", "v");
 
@@ -44,7 +43,12 @@ function lowerFirst(value: string): string {
 }
 
 function splitIdentifierIntoWords(identifier: string): ReadonlyArray<string> {
-	return identifier.split(WORD_BOUNDARY_REGEX);
+	return identifier
+		.replaceAll(/(?<=[a-z])(?=[A-Z])/gu, " ")
+		.replaceAll(/(?<=[A-Z])(?=[A-Z][a-z])/gu, " ")
+		.replaceAll(/(?<=[a-zA-Z])(?=\d)/gu, " ")
+		.replaceAll(/(?<=\d)(?=[a-zA-Z])/gu, " ")
+		.split(" ");
 }
 
 function countCaptureGroups(replacement: string): number {

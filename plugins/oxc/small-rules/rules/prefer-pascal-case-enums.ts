@@ -3,12 +3,39 @@ import { defineRule } from "oxlint-plugin-utilities";
 import type { ESTree, Visitor } from "oxlint-plugin-utilities";
 
 const WORD_PATTERN = /[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+/gv;
-const NORMALIZE_0 = /^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/gv;
 const NORMALIZE_1 = /([a-z0-9])([A-Z])/gv;
 const NORMALIZE_2 = /[_\-\s]+/gv;
 
+const IS_ALPHANUMERIC = /[A-Za-z0-9]/u;
+
+function isAlphanumeric(character: string): boolean {
+	return IS_ALPHANUMERIC.test(character);
+}
+
+function trimNonAlphanumeric(value: string): string {
+	let start = 0;
+	let end = value.length;
+
+	while (start < end) {
+		const character = value[start];
+		if (character === undefined || isAlphanumeric(character)) {
+			break;
+		}
+		start += 1;
+	}
+	while (end > start) {
+		const character = value[end - 1];
+		if (character === undefined || isAlphanumeric(character)) {
+			break;
+		}
+		end -= 1;
+	}
+	return value.slice(start, end);
+}
+
 function splitIntoWords(value: string): ReadonlyArray<string> {
-	const normalized = value.replaceAll(NORMALIZE_0, "").replaceAll(NORMALIZE_1, "$1 $2").replaceAll(NORMALIZE_2, " ");
+	const trimmed = trimNonAlphanumeric(value);
+	const normalized = trimmed.replaceAll(NORMALIZE_1, "$1 $2").replaceAll(NORMALIZE_2, " ");
 	return normalized.match(WORD_PATTERN) ?? [];
 }
 

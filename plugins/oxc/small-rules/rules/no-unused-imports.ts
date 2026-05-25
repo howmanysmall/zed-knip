@@ -13,16 +13,16 @@ interface ImportInfo {
 }
 
 const JSDOC_PATTERN = new RegExp(
-	String.raw`(?:@(?:link|linkcode|linkplain|see)\s+\{?\w+\b\}?)|` +
-		String.raw`(?:\{@(?:link|linkcode|linkplain|see)\s+\w+\b\})|` +
-		String.raw`(?:[@{](?:type|typedef|param|returns?|template|augments|extends|implements)\s+[^}]*\b\w+\b)`,
+	String.raw`@(?:link|linkcode|linkplain|see)\s+\{?\w+\b\}?|` +
+		String.raw`\{@(?:link|linkcode|linkplain|see)\s+\w+\}|` +
+		String.raw`[@{](?:type|typedef|param|returns?|template|augments|extends|implements)\s[^}]*\b\w+\b`,
 	"u",
 );
 
 const JSDOC_IDENTIFIER_PATTERN = new RegExp(
-	String.raw`(?:@(?:link|linkcode|linkplain|see)\s+\{?(\w+)\b\}?)|` +
-		String.raw`(?:\{@(?:link|linkcode|linkplain|see)\s+(\w+)\b\})|` +
-		String.raw`(?:[@{](?:type|typedef|param|returns?|template|augments|extends|implements)\s+[^}]*\b(\w+)\b)`,
+	String.raw`@(?:link|linkcode|linkplain|see)\s+\{?(\w+)\b\}?|` +
+		String.raw`\{@(?:link|linkcode|linkplain|see)\s+(\w+)\}|` +
+		String.raw`[@{](?:type|typedef|param|returns?|template|augments|extends|implements)\s[^}]*\b(\w+)\b`,
 	"gu",
 );
 

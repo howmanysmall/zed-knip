@@ -13,7 +13,7 @@ const configuration: UserConfig = {
 		"footer-leading-blank": [RuleConfigSeverity.Error, "always"],
 		"footer-max-line-length": [RuleConfigSeverity.Error, "always", 72],
 		"header-max-length": [RuleConfigSeverity.Error, "always", 72],
-		"references-empty": [RuleConfigSeverity.Warning, "never"],
+		"references-empty": [RuleConfigSeverity.Disabled, "never"],
 		"scope-case": [RuleConfigSeverity.Error, "always", ["lower-case"]],
 		"scope-empty": [RuleConfigSeverity.Disabled, "always"],
 		"scope-max-length": [RuleConfigSeverity.Error, "always", 30],
