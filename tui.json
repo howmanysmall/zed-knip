@@ -1,0 +1,4 @@
+{
+	"$schema": "https://opencode.ai/tui.json",
+	"keybinds": { "model_list": "ctrl+m" }
+}

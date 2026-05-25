@@ -1,0 +1,13 @@
+allowBuilds:
+  esbuild: false
+  core-js: false
+  sharp: false
+
+# packages:
+
+# overrides:
+
+# patchedDependencies:
+
+trustPolicyExclude:
+  - skills

@@ -1,0 +1,301 @@
+{
+	"always_treat_brackets_as_autoclosed": true,
+	"auto_indent": "syntax_aware",
+	"code_actions_on_format": {
+		"source.fixAll": true,
+		"source.organizeImports": false
+	},
+	"colorize_brackets": true,
+	"disable_ai": false,
+	"ensure_final_newline_on_save": true,
+	"file_types": {
+		"JSONC": [
+			"tsconfig.json",
+			"jsconfig.json",
+			".vscode/*.json",
+			".oxfmtrc.json",
+			".oxlintrc.json",
+			"*.code-workspace",
+			"tsconfig*.json",
+			"*.code-snippets"
+		],
+		"Shell Script": ["zsh", "zshrc", "zprofile", "zshenv", "bashrc", "bash_profile"]
+	},
+	"format_on_save": "on",
+	"hard_tabs": true,
+	"indent_guides": {
+		"active_line_width": 1,
+		"background_coloring": "disabled",
+		"coloring": "indent_aware",
+		"enabled": true,
+		"line_width": 1
+	},
+	"inlay_hints": {
+		"edit_debounce_ms": 700,
+		"enabled": true,
+		"scroll_debounce_ms": 50,
+		"show_other_hints": true,
+		"show_parameter_hints": true,
+		"show_type_hints": true
+	},
+	"jsx_tag_auto_close": { "enabled": true },
+	"languages": {
+		"JavaScript": { "language_servers": [] },
+		"JSON": {
+			"code_actions_on_format": {
+				"source.fixAll.biome": true,
+				"source.organizeImports.biome": true
+			},
+			"format_on_save": "on",
+			"formatter": [
+				{
+					"language_server": { "name": "biome" }
+				},
+				{
+					"language_server": { "name": "oxfmt" }
+				}
+			],
+			"hard_tabs": true,
+			"language_servers": [
+				"dependi",
+				"deputy",
+				"biome",
+				"codebook",
+				"harper-ls",
+				"json-language-server",
+				"oxfmt",
+				"package-version-server",
+				"wakatime"
+			],
+			"prettier": { "allowed": false },
+			"tab_size": 4
+		},
+		"JSONC": {
+			"code_actions_on_format": {
+				"source.fixAll.biome": true,
+				"source.organizeImports.biome": true
+			},
+			"format_on_save": "on",
+			"formatter": [
+				{
+					"language_server": { "name": "biome" }
+				},
+				{
+					"language_server": { "name": "oxfmt" }
+				}
+			],
+			"hard_tabs": true,
+			"language_servers": [
+				"dependi",
+				"deputy",
+				"biome",
+				"codebook",
+				"harper-ls",
+				"json-language-server",
+				"oxfmt",
+				"package-version-server",
+				"wakatime"
+			],
+			"prettier": { "allowed": false },
+			"tab_size": 4
+		},
+		"Markdown": {
+			"format_on_save": "on",
+			"formatter": {
+				"language_server": { "name": "rumdl" }
+			},
+			"hard_tabs": true,
+			"language_servers": ["codebook", "harper-ls", "rumdl", "wakatime"],
+			"prettier": { "allowed": false },
+			"show_whitespaces": "none",
+			"tab_size": 4
+		},
+		"MDX": {
+			"format_on_save": "on",
+			"formatter": {
+				"language_server": { "name": "oxfmt" }
+			},
+			"language_servers": ["codebook", "harper-ls", "oxfmt", "rumdl", "wakatime"],
+			"prettier": { "allowed": false }
+		},
+		"Plain Text": {
+			"language_servers": ["codebook", "dependi", "harper-ls", "wakatime"]
+		},
+		"Rust": {
+			"language_servers": ["codebook", "harper-ls", "rust-analyzer", "wakatime"],
+			"prettier": { "allowed": false }
+		},
+		"Shell Script": {
+			"format_on_save": "on",
+			"formatter": {
+				"external": {
+					"arguments": ["-i", "4", "-bn", "-ci", "-sr"],
+					"command": "shfmt"
+				}
+			},
+			"hard_tabs": true,
+			"language_servers": ["bash-language-server", "wakatime", "harper-ls", "codebook"],
+			"tab_size": 4
+		},
+		"TOML": {
+			"format_on_save": "on",
+			"formatter": "language_server",
+			"hard_tabs": true,
+			"language_servers": ["dependi", "deputy", "tombi", "wakatime", "harper-ls", "codebook"],
+			"tab_size": 4
+		},
+		"TSX": {
+			"code_actions_on_format": {
+				"source.fixAll.biome": true,
+				"source.fixAll.oxc": true,
+				"source.organizeImports.biome": false
+			},
+			"format_on_save": "on",
+			"formatter": [
+				{
+					"language_server": { "name": "biome" }
+				},
+				{
+					"language_server": { "name": "oxfmt" }
+				}
+			],
+			"hard_tabs": true,
+			"language_servers": ["!vtsls", "biome", "oxlint", "oxfmt", "tsgo", "wakatime", "harper-ls", "codebook"],
+			"prettier": { "allowed": false },
+			"tab_size": 4
+		},
+		"TypeScript": {
+			"code_actions_on_format": {
+				"source.fixAll": true,
+				"source.fixAll.oxc": true,
+				"source.fixAllDangerous.oxc": false,
+				"source.format.oxc": true,
+				"source.organizeImports": true,
+				"source.sort.json": true
+			},
+			"format_on_save": "on",
+			"formatter": [
+				{
+					"language_server": { "name": "biome" }
+				},
+				{
+					"language_server": { "name": "oxfmt" }
+				}
+			],
+			"hard_tabs": true,
+			"language_servers": ["!vtsls", "biome", "oxlint", "oxfmt", "tsgo", "wakatime", "harper-ls", "codebook"],
+			"prettier": { "allowed": false },
+			"tab_size": 4
+		},
+		"YAML": {
+			"format_on_save": "on",
+			"formatter": {
+				"language_server": { "name": "oxfmt" }
+			},
+			"hard_tabs": false,
+			"language_servers": ["dependi", "yaml-language-server", "wakatime", "harper-ls", "codebook"],
+			"prettier": { "allowed": false },
+			"tab_size": 2
+		}
+	},
+	"lsp": {
+		"bash-language-server": {
+			"settings": {
+				"bashIde": {
+					"globPattern": "**/*@(.sh|.inc|.bash|.command|.zsh)"
+				}
+			}
+		},
+		"oxfmt": {
+			"initialization_options": {
+				"settings": {
+					"configPath": ".oxfmtrc.json",
+					"run": "onSave"
+				}
+			}
+		},
+		"oxlint": {
+			"initialization_options": {
+				"settings": {
+					"fixKind": "safe_fix"
+				}
+			}
+		},
+		"rust-analyzer": {
+			"enable_lsp_tasks": true,
+			"initialization_options": {
+				"cargo": {
+					"allTargets": true,
+					"buildScripts": { "enable": true },
+					"features": "all",
+					"targetDir": true
+				},
+				"check": {
+					"allTargets": true,
+					"command": "clippy",
+					"features": "all",
+					"workspace": true
+				},
+				"checkOnSave": true,
+				"diagnostics": {
+					"experimental": { "enable": true },
+					"styleLints": { "enable": true }
+				},
+				"inlayHints": {
+					"bindingModeHints": { "enable": true },
+					"chainingHints": { "enable": true },
+					"closureCaptureHints": { "enable": true },
+					"closureReturnTypeHints": { "enable": "always" },
+					"genericParameterHints": {
+						"const": { "enable": true },
+						"lifetime": { "enable": true },
+						"type": { "enable": true }
+					},
+					"lifetimeElisionHints": {
+						"enable": "skip_trivial",
+						"useParameterNames": true
+					},
+					"maxLength": null,
+					"parameterHints": {
+						"enable": true,
+						"missingArguments": { "enable": true }
+					},
+					"typeHints": { "enable": true }
+				},
+				"procMacro": { "enable": true }
+			}
+		},
+		"yaml-language-server": {
+			"settings": {
+				"yaml": {
+					"format": { "singleQuote": true },
+					"keyOrdering": false,
+					"schemas": {
+						"https://json.schemastore.org/github-workflow.json": ".github/workflows/*",
+						"https://raw.githubusercontent.com/evilmartians/lefthook/master/schema.json": [
+							"lefthook.yml",
+							".lefthook.yml",
+							"lefthook.yaml",
+							".lefthook.yaml"
+						],
+						"https://www.schemastore.org/dependabot-2.0.json": ".github/dependabot.*"
+					}
+				}
+			}
+		}
+	},
+	"prettier": { "allowed": false },
+	"remove_trailing_whitespace_on_save": true,
+	"show_completion_documentation": true,
+	"show_completions_on_input": true,
+	"show_edit_predictions": true,
+	"soft_wrap": "prefer_line",
+	"tab_size": 4,
+	"terminal": {
+		"shell": "system",
+		"working_directory": "current_project_directory"
+	},
+	"use_auto_surround": true,
+	"use_autoclose": true,
+	"use_on_type_format": true
+}

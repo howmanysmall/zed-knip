@@ -1,0 +1,22 @@
+/target/
+/test/
+.env
+.DS_Store
+
+*.o
+*.d
+*.rlib
+.rustfmt_errors.txt
+.lefthook/
+.envrc
+
+# opensrc - source code for packages
+opensrc/
+
+.agents/skills/cargo-nextest/
+.agents/skills/llm-council/
+.agents/skills/markdown-url/
+.agents/skills/plan-harder/
+.agents/skills/planner/
+.agents/skills/rust-best-practices/
+.agents/skills/tdd-test-writer/

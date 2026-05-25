@@ -1,0 +1,11 @@
+{
+	"compilerOptions": {
+		"paths": {
+			"@build-plugins/*": ["./scripts/plugins/*"],
+			"@build-polyfills/*": ["./scripts/polyfills/*"],
+			"@build-utilities/*": ["./scripts/build-utilities/*"]
+		}
+	},
+	"extends": "./tsconfig.base.json",
+	"include": ["scripts/**/*.ts"]
+}

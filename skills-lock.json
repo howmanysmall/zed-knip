@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "skills": {
+    "cargo-nextest": {
+      "source": "laurigates/claude-plugins",
+      "sourceType": "github",
+      "skillPath": "rust-plugin/skills/cargo-nextest/SKILL.md",
+      "computedHash": "3e7b273e5b6d6100a6a8e759dc161252238f543e837f860018e5764ade0667e9"
+    },
+    "llm-council": {
+      "source": "am-will/codex-skills",
+      "sourceType": "github",
+      "skillPath": "skills/llm-council/SKILL.md",
+      "computedHash": "ac408ec68f72afce439aac6dc45d0f35394ef6b17bd08ce5f35843909eadb51c"
+    },
+    "markdown-url": {
+      "source": "am-will/codex-skills",
+      "sourceType": "github",
+      "skillPath": "skills/markdown-url/SKILL.md",
+      "computedHash": "4ec19a7bf6c8e3f4889f4d13bd46f5d346984817e5029a2c4da305265bddbd99"
+    },
+    "plan-harder": {
+      "source": "am-will/codex-skills",
+      "sourceType": "github",
+      "skillPath": "skills/plan-harder/SKILL.md",
+      "computedHash": "a5a22b3a135f349474a4a482992c264e5c6f8bdaa614517522420d334a810a12"
+    },
+    "planner": {
+      "source": "am-will/codex-skills",
+      "sourceType": "github",
+      "skillPath": "skills/planner/SKILL.md",
+      "computedHash": "ab1d97975dcf20cebe27960f1b0abd7e2db16fa31261aebe29342eca33076f91"
+    },
+    "rust-best-practices": {
+      "source": "apollographql/skills",
+      "sourceType": "github",
+      "skillPath": "skills/rust-best-practices/SKILL.md",
+      "computedHash": "fd336f2f772eb46ddf8658de5f9dd8faa1f35615b316665307fc82eeb4b2e658"
+    },
+    "tdd-test-writer": {
+      "source": "am-will/codex-skills",
+      "sourceType": "github",
+      "computedHash": "d12b7bec698ceb6491f81682fb9aa2e56b5376c5741fae4022d6b413edccf181"
+    }
+  }
+}

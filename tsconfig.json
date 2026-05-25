@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"noEmit": true,
+		"paths": {
+			"@constants/*": ["./scripts/shared/constants/*"],
+			"@polyfills/*": ["./scripts/shared/polyfills/*"],
+			"@utilities/*": ["./scripts/shared/utilities/*"]
+		},
+		"resolveJsonModule": true,
+		"rootDir": "."
+	},
+	"extends": "./tsconfig.base.json",
+	"include": ["commitlint.config.ts", "scripts/**/*.ts"]
+}

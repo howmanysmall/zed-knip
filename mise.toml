@@ -1,0 +1,43 @@
+min_version = "2024.11.0"
+
+[tools]
+aube = "latest"
+gitleaks = "latest"
+lefthook = "latest"
+node = "25"
+rumdl = "latest"
+tombi = "latest"
+rust = "1.93.1"
+"github:howmanysmall/pullhook" = "latest"
+bun = "latest"
+
+[env]
+PROJECT_NAME = "{{ config_root | basename }}"
+_.file = { path = ".env" }
+_.path = ["{{config_root}}/node_modules/.bin", "{{cwd}}/node_modules/.bin"]
+
+[settings]
+auto_install = false
+lockfile = true
+
+[tasks]
+audit = "cargo audit"
+build = "cargo build"
+build-release = "cargo build --release"
+deny = "cargo deny check"
+fmt = "cargo fmt --all"
+install = "cargo install --path ."
+lint = "cargo clippy --all-targets -- -D warnings"
+test = "cargo nextest run"
+
+bi = "cargo build"
+br = "cargo build --release"
+ti = "cargo nextest run"
+
+[tasks.lockfile]
+description = "Regenerate lockfile checksums for all tools, then install"
+run = ["mise lock", "mise install"]
+
+[tasks.lockfile-tool]
+description = "Regenerate lockfile checksums for a specific tool, then install"
+run = ["mise lock {{arg(name='tool')}}", "mise install"]

@@ -1,0 +1,237 @@
+name: zed-knip/ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  # Check code formatting
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          components: rustfmt
+          toolchain: "1.93.1"
+      - run: cargo fmt --all --check
+
+  # Run Clippy lints
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          components: clippy
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Run tests with nextest
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-nextest
+        run: cargo binstall --force --no-confirm cargo-nextest@0.9.129
+      - run: cargo nextest run --all-targets --all-features
+
+  # Security audit
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-audit
+        run: cargo binstall --force --no-confirm cargo-audit@0.22.1
+      - run: cargo audit
+
+  # Dependency policy enforcement
+  deny:
+    name: Dependency Policy (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-deny
+        run: cargo binstall --force --no-confirm cargo-deny@0.19.0
+      - run: cargo deny check
+
+  # Dead code detection
+  shear:
+    name: Dead Code (cargo-shear)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-shear
+        run: cargo binstall --force --no-confirm cargo-shear@1.9.1
+      - run: cargo shear
+
+  # Secret scanning
+  gitleaks:
+    name: Secret Scanning (gitleaks)
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Documentation linting
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - env:
+          RUSTDOCFLAGS: "-D warnings"
+        name: Check Rust docs
+        run: cargo doc --no-deps --document-private-items --all-features
+
+  # Ensure generated cargo-dist release workflow is up to date
+  dist-release-workflow:
+    env:
+      # This job only needs cargo metadata for cargo-dist generation checks.
+      CARGO_BUILD_RUSTC_WRAPPER: ""
+      RUSTC_WRAPPER: ""
+    name: Release Workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - name: Install cargo-dist
+        run: |
+          dist_version="$(sed -n 's/^cargo-dist-version = "\(.*\)"/\1/p' dist-workspace.toml)"
+          if [[ -z "${dist_version}" ]]; then
+              echo "Failed to read cargo-dist-version from dist-workspace.toml"
+              exit 1
+          fi
+
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${dist_version}/cargo-dist-installer.sh" | sh
+        shell: bash
+      - name: Check generated release workflow
+        run: dist generate --mode ci --check
+
+  # Informational: Binary size analysis
+  bloat:
+    if: github.event_name == 'pull_request'
+    name: Binary Size (cargo-bloat)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-bloat
+        run: cargo binstall --force --no-confirm cargo-bloat@0.12.1
+      - name: Build release binary
+        run: cargo build --release
+      - name: Analyze binary size
+        continue-on-error: true
+        run: cargo bloat --release --crates
+
+  # Informational: Cross-compilation smoke test
+  zigbuild:
+    if: github.event_name == 'pull_request'
+    name: Zig Cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-zigbuild
+        run: cargo binstall --force --no-confirm cargo-zigbuild@0.22.1
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Smoke test x86_64-unknown-linux-gnu
+        continue-on-error: true
+        run: cargo zigbuild --target x86_64-unknown-linux-gnu
+
+  # Summary job - all required checks must pass
+  ci-success:
+    if: always()
+    name: CI Success
+    needs: [fmt, clippy, test, audit, deny, shear, gitleaks, docs, dist-release-workflow]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all required jobs
+        run: |
+          if [[ "${{ needs.fmt.result }}" != "success" || \
+                "${{ needs.clippy.result }}" != "success" || \
+                "${{ needs.test.result }}" != "success" || \
+                "${{ needs.audit.result }}" != "success" || \
+                "${{ needs.deny.result }}" != "success" || \
+                "${{ needs.shear.result }}" != "success" || \
+                "${{ needs.gitleaks.result }}" != "success" || \
+                "${{ needs.docs.result }}" != "success" || \
+                "${{ needs.dist-release-workflow.result }}" != "success" ]]; then
+            echo "One or more required jobs failed"
+            exit 1
+          fi
+          echo "All required CI checks passed!"
