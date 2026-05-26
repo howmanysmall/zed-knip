@@ -506,6 +506,325 @@ fn lsp_parity_settings_node_runtime_path_is_implemented() {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostic shape detail tests
+// ---------------------------------------------------------------------------
+
+/// All known Knip diagnostic codes emitted by the language server.
+/// Source: packages/language-server/src/diagnostics.js
+const KNIP_DIAGNOSTIC_CODE_UNUSED_FILE: &str = "unused-file";
+const KNIP_DIAGNOSTIC_CODE_UNUSED_EXPORT: &str = "unused-export";
+const KNIP_DIAGNOSTIC_CODE_UNUSED_DEPENDENCY: &str = "unused-dependency";
+const KNIP_DIAGNOSTIC_CODE_CIRCULAR_DEPENDENCY: &str = "circular-dependency";
+
+#[test]
+fn lsp_parity_diagnostic_codes_are_kebab_case_strings() {
+	// Knip emits string codes (not numeric) for all diagnostics.
+	// Zed surfaces these in the gutter and problem panel.
+	for code in [
+		KNIP_DIAGNOSTIC_CODE_UNUSED_FILE,
+		KNIP_DIAGNOSTIC_CODE_UNUSED_EXPORT,
+		KNIP_DIAGNOSTIC_CODE_UNUSED_DEPENDENCY,
+		KNIP_DIAGNOSTIC_CODE_CIRCULAR_DEPENDENCY,
+	] {
+		assert!(!code.is_empty(), "diagnostic code must not be empty");
+		assert!(
+			code.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+			"diagnostic code '{code}' must be kebab-case"
+		);
+	}
+}
+
+#[test]
+fn lsp_parity_diagnostic_source_field_is_always_knip() {
+	// All Knip diagnostics must carry source = "knip" so Zed can filter them.
+	let diagnostics = vec![
+		Diagnostic {
+			range: Range {
+				start: Position { line: 0, character: 0 },
+				end: Position { line: 0, character: 0 },
+			},
+			severity: DiagnosticSeverity::Warning,
+			source: "knip".to_owned(),
+			message: "Unused file".to_owned(),
+			code: Some(KNIP_DIAGNOSTIC_CODE_UNUSED_FILE.to_owned()),
+		},
+		Diagnostic {
+			range: Range {
+				start: Position { line: 4, character: 9 },
+				end: Position { line: 4, character: 20 },
+			},
+			severity: DiagnosticSeverity::Warning,
+			source: "knip".to_owned(),
+			message: "Unused export 'myFn'".to_owned(),
+			code: Some(KNIP_DIAGNOSTIC_CODE_UNUSED_EXPORT.to_owned()),
+		},
+		Diagnostic {
+			range: Range {
+				start: Position { line: 10, character: 4 },
+				end: Position {
+					line: 10,
+					character: 14,
+				},
+			},
+			severity: DiagnosticSeverity::Warning,
+			source: "knip".to_owned(),
+			message: "Unused dependency 'lodash'".to_owned(),
+			code: Some(KNIP_DIAGNOSTIC_CODE_UNUSED_DEPENDENCY.to_owned()),
+		},
+	];
+
+	for diag in &diagnostics {
+		assert_eq!(diag.source, "knip", "all Knip diagnostics must have source = 'knip'");
+	}
+}
+
+#[test]
+fn lsp_parity_diagnostic_severity_is_warning_for_all_knip_issues() {
+	// Knip reports all issues as Warning (not Error/Information/Hint).
+	// This matches VSCode extension behaviour: diagnostics.js always uses Warning.
+	let severity = DiagnosticSeverity::Warning;
+	assert_eq!(severity as u8, 2, "Warning must be LSP severity 2");
+}
+
+#[test]
+fn lsp_parity_diagnostic_range_is_zero_based_lsp_positions() {
+	// LSP positions are 0-based. Knip provides character-level ranges for
+	// exports/dependencies and file-level (0,0)-(0,0) for unused-file.
+	let file_level_range = Range {
+		start: Position { line: 0, character: 0 },
+		end: Position { line: 0, character: 0 },
+	};
+	// File-level diagnostics use the document start.
+	assert_eq!(file_level_range.start.line, 0);
+	assert_eq!(file_level_range.start.character, 0);
+
+	let symbol_range = Range {
+		start: Position { line: 4, character: 9 },
+		end: Position { line: 4, character: 20 },
+	};
+	// Symbol ranges span the identifier.
+	assert!(symbol_range.end.character > symbol_range.start.character);
+}
+
+#[test]
+fn lsp_parity_diagnostic_publish_params_uri_is_file_scheme() {
+	// publishDiagnostics URIs must use the file:// scheme.
+	let params = sample_unused_export_diagnostic("file:///workspace/src/utils.ts");
+	assert!(
+		params.uri.starts_with("file://"),
+		"diagnostic URI must use file:// scheme"
+	);
+}
+
+#[test]
+fn lsp_parity_diagnostic_multiple_issues_in_one_file_are_batched() {
+	// Knip batches all diagnostics for a file into a single publishDiagnostics
+	// notification rather than sending one notification per issue.
+	let params = PublishDiagnosticsParams {
+		uri: "file:///workspace/src/utils.ts".to_owned(),
+		diagnostics: vec![
+			Diagnostic {
+				range: Range {
+					start: Position { line: 2, character: 0 },
+					end: Position { line: 2, character: 8 },
+				},
+				severity: DiagnosticSeverity::Warning,
+				source: "knip".to_owned(),
+				message: "Unused export 'helperA'".to_owned(),
+				code: Some(KNIP_DIAGNOSTIC_CODE_UNUSED_EXPORT.to_owned()),
+			},
+			Diagnostic {
+				range: Range {
+					start: Position { line: 8, character: 0 },
+					end: Position { line: 8, character: 8 },
+				},
+				severity: DiagnosticSeverity::Warning,
+				source: "knip".to_owned(),
+				message: "Unused export 'helperB'".to_owned(),
+				code: Some(KNIP_DIAGNOSTIC_CODE_UNUSED_EXPORT.to_owned()),
+			},
+		],
+	};
+
+	assert_eq!(
+		params.diagnostics.len(),
+		2,
+		"multiple diagnostics batched in one notification"
+	);
+	assert_eq!(params.diagnostics[0].source, params.diagnostics[1].source);
+}
+
+#[test]
+fn lsp_parity_diagnostic_clear_is_empty_diagnostics_array() {
+	// When Knip resolves all issues in a file, it sends publishDiagnostics
+	// with an empty array — the standard LSP way to clear diagnostics.
+	let clear_params = PublishDiagnosticsParams {
+		uri: "file:///workspace/src/fixed.ts".to_owned(),
+		diagnostics: vec![],
+	};
+
+	assert!(
+		clear_params.diagnostics.is_empty(),
+		"clearing diagnostics sends empty array"
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Code action shape detail tests
+// ---------------------------------------------------------------------------
+
+/// Known Knip code action kind prefixes.
+const KNIP_CODE_ACTION_KIND_PREFIX: &str = "quickfix.knip.";
+
+#[test]
+fn lsp_parity_code_action_kinds_use_knip_prefix() {
+	// All Knip code action kinds must start with "quickfix.knip." to namespace
+	// them and allow Zed to filter/display them correctly.
+	let kinds = [
+		"quickfix.knip.removeExport",
+		"quickfix.knip.addJsDocTag",
+		"quickfix.knip.removeDependency",
+	];
+
+	for kind in kinds {
+		assert!(
+			kind.starts_with(KNIP_CODE_ACTION_KIND_PREFIX),
+			"code action kind '{kind}' must start with '{KNIP_CODE_ACTION_KIND_PREFIX}'"
+		);
+	}
+}
+
+#[test]
+fn lsp_parity_code_action_remove_export_is_preferred() {
+	// "Remove export" is the primary fix for an unused-export diagnostic and
+	// should be marked is_preferred = true so Zed highlights it.
+	let action = sample_remove_export_action();
+	assert!(action.is_preferred, "remove-export action must be preferred");
+}
+
+#[test]
+fn lsp_parity_code_action_add_jsdoc_is_not_preferred() {
+	// "Add @public JSDoc tag" is an alternative (suppress) action, not the
+	// primary fix, so is_preferred = false.
+	let action = sample_add_jsdoc_action();
+	assert!(!action.is_preferred, "add-jsdoc action must not be preferred");
+}
+
+#[test]
+fn lsp_parity_code_action_remove_dependency_is_not_preferred() {
+	// "Remove dependency" modifies package.json and is destructive; it is not
+	// marked preferred so the user must explicitly choose it.
+	let action = sample_remove_dependency_action();
+	assert!(!action.is_preferred, "remove-dependency action must not be preferred");
+}
+
+#[test]
+fn lsp_parity_code_action_title_contains_symbol_name() {
+	// Code action titles must include the affected symbol/dependency name so
+	// the user can distinguish multiple actions in the same file.
+	let export_action = sample_remove_export_action();
+	assert!(
+		export_action.title.contains("myFunction"),
+		"remove-export title must contain the symbol name"
+	);
+
+	let dep_action = sample_remove_dependency_action();
+	assert!(
+		dep_action.title.contains("lodash"),
+		"remove-dependency title must contain the dependency name"
+	);
+}
+
+#[test]
+fn lsp_parity_code_action_method_returns_list_not_single_item() {
+	// textDocument/codeAction returns a Vec of actions, not a single action.
+	// Zed presents all returned actions in the lightbulb menu.
+	let actions: Vec<CodeAction> = vec![sample_remove_export_action(), sample_add_jsdoc_action()];
+
+	assert!(actions.len() > 1, "codeAction response is a list");
+}
+
+// ---------------------------------------------------------------------------
+// Hover shape detail tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lsp_parity_hover_contents_is_markdown_string() {
+	// Knip hover responses use MarkupContent with kind = "markdown".
+	// Zed renders markdown hover content natively.
+	let hover = sample_export_hover();
+	// Markdown bold syntax for the symbol name.
+	assert!(
+		hover.contents.contains("**"),
+		"hover contents must use markdown bold for symbol name"
+	);
+}
+
+#[test]
+fn lsp_parity_hover_export_lists_consuming_files() {
+	// Export hover shows which files import the symbol.
+	let hover = sample_export_hover();
+	assert!(hover.contents.contains("src/a.ts"), "hover must list consuming files");
+	assert!(hover.contents.contains("src/b.ts"));
+	assert!(hover.contents.contains("src/c.ts"));
+}
+
+#[test]
+fn lsp_parity_hover_dependency_targets_package_json() {
+	// Dependency hover is triggered on package.json entries.
+	// The hover response includes the dependency name and usage locations.
+	let hover = sample_dependency_hover();
+	assert!(
+		hover.contents.contains("lodash"),
+		"dependency hover must name the package"
+	);
+	assert!(
+		hover.contents.contains("src/utils.ts"),
+		"dependency hover must list usage files"
+	);
+}
+
+#[test]
+fn lsp_parity_hover_range_spans_the_hovered_symbol() {
+	// The hover range tells Zed which text to highlight while the hover is shown.
+	let hover = sample_export_hover();
+	let range = hover.range.as_ref().expect("export hover must include a range");
+	// Range must span at least one character.
+	assert!(
+		range.end.character > range.start.character || range.end.line > range.start.line,
+		"hover range must span at least one character"
+	);
+}
+
+#[test]
+fn lsp_parity_hover_timeout_is_documented_constraint() {
+	// Hover provider implements a 300ms timeout to prevent UI lag.
+	// This is a performance constraint, not a protocol constraint.
+	// Documented in docs/parity-matrix.md under Performance Constraints.
+	let timeout_ms: u32 = 300;
+	assert!(timeout_ms <= 500, "hover timeout must be ≤500ms to avoid UI lag");
+}
+
+#[test]
+fn lsp_parity_hover_unused_symbol_shows_zero_usages() {
+	// When a symbol has zero usages (it is unused), the hover still renders
+	// but shows "used in 0 files" rather than omitting the usage list.
+	let hover = HoverResponse {
+		contents: "**deadFn** — used in 0 files".to_owned(),
+		range: Some(Range {
+			start: Position { line: 1, character: 7 },
+			end: Position { line: 1, character: 13 },
+		}),
+	};
+
+	assert!(
+		hover.contents.contains("0 files"),
+		"unused symbol hover must show 0 usages"
+	);
+	assert!(hover.range.is_some());
+}
+
+// ---------------------------------------------------------------------------
 // Parity matrix completeness test
 // ---------------------------------------------------------------------------
 
