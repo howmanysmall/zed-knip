@@ -769,6 +769,44 @@ mod tests {
 		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
 	}
 
+	#[test]
+	fn resolver_uses_nested_workspace_root_in_monorepo() {
+		let workspace = TestWorkspace::new("monorepo-nested-root");
+		workspace.package_json("pnpm");
+		workspace.executable("node_modules/.bin/knip-language-server");
+		workspace.write(
+			"packages/app/package.json",
+			"{\"name\":\"app\",\"packageManager\":\"npm@10.0.0\"}",
+		);
+		let nested_local = workspace.executable("packages/app/node_modules/.bin/knip-language-server");
+		let nested_root = workspace.root.join("packages/app");
+
+		let resolved = resolve_knip(&KnipSettings::default(), &cache(&nested_root), &ManagedInstallDisabled).unwrap();
+
+		assert_eq!(resolved.executable_path, nested_local);
+		assert_eq!(resolved.package_manager, PackageManager::Npm);
+		assert_eq!(resolved.install_source, InstallSource::WorkspaceLocal);
+	}
+
+	#[test]
+	fn resolver_nested_workspace_does_not_inherit_parent_package_manager() {
+		let workspace = TestWorkspace::new("monorepo-no-parent-manager");
+		workspace.package_json("pnpm");
+		workspace.executable("node_modules/.bin/knip-language-server");
+		let nested_root = workspace.root.join("packages/lib");
+		fs::create_dir_all(&nested_root)
+			.unwrap_or_else(|error| panic!("failed to create {}: {error}", nested_root.display()));
+
+		let error = resolve_knip(&KnipSettings::default(), &cache(&nested_root), &ManagedInstallDisabled).unwrap_err();
+
+		assert_eq!(
+			error,
+			KnipError::UnsupportedWorkspace {
+				reason: "No supported package manager lockfile or packageManager field was found.".to_string()
+			}
+		);
+	}
+
 	#[cfg(unix)]
 	#[test]
 	fn resolver_follows_symlink_to_workspace_local_executable() {

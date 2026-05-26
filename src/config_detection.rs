@@ -40,8 +40,13 @@ mod tests {
 	use super::*;
 	use std::{
 		fs,
+		path::Path,
 		time::{SystemTime, UNIX_EPOCH},
 	};
+
+	fn fixture(name: &str) -> PathBuf {
+		Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
+	}
 
 	#[derive(Debug)]
 	struct TestWorkspace {
@@ -99,6 +104,27 @@ mod tests {
 		workspace.write("packages/app/knip.json");
 
 		assert_eq!(detect_config(&workspace.root), None);
+	}
+
+	#[test]
+	fn detect_config_finds_monorepo_root_config_without_nested_scan() {
+		let root = fixture("monorepo");
+
+		assert_eq!(detect_config(&root), Some(root.join("knip.json")));
+	}
+
+	#[test]
+	fn detect_config_finds_nested_package_config_when_nested_root_is_used() {
+		let nested_root = fixture("monorepo").join("packages/app");
+
+		assert_eq!(detect_config(&nested_root), Some(nested_root.join("knip.json")));
+	}
+
+	#[test]
+	fn detect_config_nested_package_without_config_does_not_inherit_monorepo_root_config() {
+		let nested_root = fixture("monorepo").join("packages/lib");
+
+		assert_eq!(detect_config(&nested_root), None);
 	}
 
 	#[test]

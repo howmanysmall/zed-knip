@@ -185,6 +185,34 @@ mod tests {
 
 			assert_eq!(cache.check_validity(&current), CacheState::Hit);
 		}
+
+		#[test]
+		fn cache_is_isolated_by_monorepo_worktree_root() {
+			let root_cache = WorktreeCache::new(PathBuf::from("/repo"));
+			let nested_cache = WorktreeCache::new(PathBuf::from("/repo/packages/app"));
+
+			assert_ne!(root_cache.worktree_root, nested_cache.worktree_root);
+		}
+
+		#[test]
+		fn cache_validity_does_not_reuse_inputs_from_another_worktree() {
+			let mut root_cache = valid_cache();
+			root_cache.worktree_root = PathBuf::from("/repo");
+			root_cache.executable_path = Some(PathBuf::from("/repo/node_modules/.bin/knip"));
+			root_cache.config_path = Some(PathBuf::from("/repo/knip.json"));
+
+			let nested_inputs = InvalidationInputs {
+				package_json_mtime: Some(time(11)),
+				lockfile_mtime: Some(time(21)),
+				knip_config_mtime: Some(time(31)),
+				settings_hash: 42,
+			};
+
+			assert_eq!(
+				root_cache.check_validity(&nested_inputs),
+				CacheState::Stale(StaleReason::PackageChanged)
+			);
+		}
 	}
 
 	mod cache_corrupt {

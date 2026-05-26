@@ -213,6 +213,27 @@ mod tests {
 	}
 
 	#[test]
+	fn package_manager_detects_pnpm_at_monorepo_root() {
+		let manager = detect(&fixture("monorepo")).unwrap();
+
+		assert_eq!(manager, PackageManager::Pnpm);
+	}
+
+	#[test]
+	fn package_manager_detects_nested_package_root_without_parent_scan() {
+		let manager = detect(&fixture("monorepo").join("packages/app")).unwrap();
+
+		assert_eq!(manager, PackageManager::Npm);
+	}
+
+	#[test]
+	fn package_manager_nested_package_root_does_not_inherit_monorepo_root_lockfile() {
+		let error = detect(&fixture("monorepo").join("packages/lib")).unwrap_err();
+
+		assert_eq!(error, PackageManagerError::NotFound);
+	}
+
+	#[test]
 	fn package_manager_detects_npm_in_path_with_spaces_fixture() {
 		let manager = detect(&fixture("path with spaces")).unwrap();
 

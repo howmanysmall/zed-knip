@@ -1,0 +1,7 @@
+{
+	"workspaces": {
+		"packages/app": {
+			"entry": ["src/index.ts"]
+		}
+	}
+}
