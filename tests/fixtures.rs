@@ -44,3 +44,40 @@ fn fixture_inventory() {
 
 	assert_eq!(actual.len(), 12, "unexpected fixture inventory: {actual:?}");
 }
+
+#[test]
+fn fixture_path_with_spaces_is_accessible_as_pathbuf() {
+	let path = fixture_path("path with spaces");
+
+	assert!(path.is_dir(), "path-with-spaces fixture must be a directory");
+	assert!(path.is_absolute(), "fixture path must be absolute");
+	assert!(
+		path.display().to_string().contains(' '),
+		"fixture path must contain a space character"
+	);
+}
+
+#[test]
+fn fixture_path_with_spaces_contains_expected_files() {
+	let path = fixture_path("path with spaces");
+	let package_json = path.join("package.json");
+	let lockfile = path.join("package-lock.json");
+
+	assert!(
+		package_json.is_file(),
+		"path-with-spaces fixture must have package.json"
+	);
+	assert!(
+		lockfile.is_file(),
+		"path-with-spaces fixture must have package-lock.json"
+	);
+}
+
+#[test]
+fn fixture_path_join_uses_pathbuf_not_string_concat() {
+	let root = fixture_path("path with spaces");
+	let nested = root.join("node_modules").join(".bin").join("knip language server");
+
+	assert!(nested.display().to_string().contains(' '));
+	assert!(nested.is_absolute());
+}
