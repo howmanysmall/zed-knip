@@ -2,3 +2,6 @@ model = "gpt-5.4"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 web_search = "live"
+
+[sandbox_workspace_write]
+network_access = true
