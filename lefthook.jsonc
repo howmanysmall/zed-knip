@@ -14,7 +14,7 @@
 		"jobs": [
 			{
 				"name": "package-install",
-				"run": "pullhook --install",
+				"run": "mise x -- pullhook --install",
 			},
 		],
 	},
@@ -26,7 +26,7 @@
 						{
 							"glob": ["**/*.json", "**/*.jsonc"],
 							"name": "biome-fix",
-							"run": "biome check --write --no-errors-on-unmatched {staged_files}",
+							"run": "aube run biome check --write --no-errors-on-unmatched {staged_files}",
 							"stage_fixed": true,
 						},
 						{
@@ -47,25 +47,25 @@
 								"**/*.yml",
 							],
 							"name": "oxfmt",
-							"run": "oxfmt {staged_files}",
+							"run": "aube run oxfmt {staged_files}",
 							"stage_fixed": true,
 						},
 						{
 							"glob": "**/*.md",
 							"name": "rumdl-fix",
-							"run": "rumdl fmt {staged_files}\nrumdl check {staged_files}\n",
+							"run": "mise x -- rumdl fmt {staged_files}\nrumdl check {staged_files}\n",
 							"stage_fixed": true,
 						},
 						{
 							"glob": "**/*.toml",
 							"name": "tombi-fix",
-							"run": "tombi format {staged_files}\ntombi lint {staged_files}\n",
+							"run": "mise x -- tombi format {staged_files}\ntombi lint {staged_files}\n",
 							"stage_fixed": true,
 						},
 						{
 							"glob": "**/*.rs",
 							"name": "rustfmt",
-							"run": "cargo fmt -- {staged_files}",
+							"run": "mise x -- cargo fmt -- {staged_files}",
 							"stage_fixed": true,
 						},
 					],
@@ -78,7 +78,7 @@
 						{
 							"glob": ["**/*.json", "**/*.jsonc"],
 							"name": "oxfmt-json",
-							"run": "oxfmt {staged_files}",
+							"run": "aube run oxfmt {staged_files}",
 							"stage_fixed": true,
 						},
 					],
@@ -96,7 +96,7 @@
 								"**/.cargo/config.toml",
 							],
 							"name": "audit",
-							"run": "cargo audit --quiet",
+							"run": "mise x -- cargo audit --quiet",
 						},
 						{
 							"glob": [
@@ -107,7 +107,7 @@
 								"**/.cargo/config.toml",
 							],
 							"name": "clippy",
-							"run": "cargo clippy --all-targets -- -D warnings",
+							"run": "mise x -- cargo clippy --all-targets -- -D warnings",
 						},
 						{
 							"glob": [
@@ -118,7 +118,7 @@
 								"**/.cargo/config.toml",
 							],
 							"name": "deny",
-							"run": "cargo deny check",
+							"run": "mise x -- cargo deny check",
 						},
 						{
 							"glob": [
@@ -129,11 +129,11 @@
 								"**/.cargo/config.toml",
 							],
 							"name": "shear",
-							"run": "cargo shear",
+							"run": "mise x -- cargo shear",
 						},
 						{
 							"name": "gitleaks",
-							"run": "gitleaks protect --staged",
+							"run": "mise x -- gitleaks protect --staged",
 						},
 					],
 					"parallel": true,
@@ -145,7 +145,7 @@
 		"jobs": [
 			{
 				"name": "test",
-				"run": "cargo nextest run --no-tests=pass",
+				"run": "mise x -- cargo nextest run --no-tests=pass",
 			},
 		],
 	},
