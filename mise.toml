@@ -34,6 +34,13 @@ bi = "cargo build"
 br = "cargo build --release"
 ti = "cargo nextest run"
 
+ta = "cargo nextest run --all-targets --all-features"
+bw = "cargo build --release --target wasm32-wasip1"
+fa = "npm run format"
+la = "aube run lint"
+tc = "aube run type-check"
+pc = "./scripts/pre-commit.sh"
+
 [tasks.lockfile]
 description = "Regenerate lockfile checksums for all tools, then install"
 run = ["mise lock", "mise install"]
@@ -41,3 +48,55 @@ run = ["mise lock", "mise install"]
 [tasks.lockfile-tool]
 description = "Regenerate lockfile checksums for a specific tool, then install"
 run = ["mise lock {{arg(name='tool')}}", "mise install"]
+
+[tasks.test-all]
+description = "Run the full test suite (unit + integration + all targets + all features)"
+run = "cargo nextest run --all-targets --all-features"
+
+[tasks.build-wasm]
+description = "Build the release WASM artifact for Zed (wasm32-wasip1 target)"
+run = "cargo build --release --target wasm32-wasip1"
+
+[tasks.install-local]
+description = "Build WASM and install into your local Zed extensions directory for manual testing"
+run = '''
+cargo build --release --target wasm32-wasip1
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  EXT_DIR="$HOME/Library/Application Support/Zed/extensions/zed-knip"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  EXT_DIR="$HOME/.local/share/zed/extensions/zed-knip"
+else
+  echo "Unsupported OS. Set EXT_DIR manually."
+  exit 1
+fi
+
+mkdir -p "$EXT_DIR"
+cp target/wasm32-wasip1/release/zed_knip.wasm "$EXT_DIR/extension.wasm"
+cp extension.toml "$EXT_DIR/"
+echo "Installed to $EXT_DIR — restart Zed to load."
+'''
+
+[tasks.pre-commit]
+description = "Run the full pre-commit gate (format + clippy + audit + deny + shear + gitleaks)"
+run = "./scripts/pre-commit.sh"
+
+[tasks.format-all]
+description = "Format every file in the repo (Rust + JS/TS + Markdown + TOML + JSON)"
+run = "npm run format"
+
+[tasks.lint-all]
+description = "Run the full lint pipeline via aube (oxlint + biome)"
+run = "aube run lint"
+
+[tasks.type-check]
+description = "Type-check the TypeScript tooling code"
+run = "aube run type-check"
+
+[tasks.verify]
+description = "Full local verification: all tests + clippy + WASM build"
+run = [
+	"cargo nextest run --all-targets --all-features",
+	"cargo clippy --all-targets -- -D warnings",
+	"cargo build --release --target wasm32-wasip1"
+]
