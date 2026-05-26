@@ -1,6 +1,33 @@
 id = "zed-knip"
 name = "Zed Knip"
-version = "0.1.0"
 description = "Zed extension support for Knip LSP integration"
+version = "0.1.0"
+schema_version = 1
 authors = ["HowManySmall"]
 repository = "https://github.com/howmanysmall/zed-knip"
+license = "MIT"
+
+[language_servers.knip]
+name = "Knip"
+languages = ["JavaScript", "JSX", "TypeScript", "TSX"]
+
+[language_servers.knip.language_ids]
+JavaScript = "javascript"
+JSX = "javascriptreact"
+TypeScript = "typescript"
+TSX = "typescriptreact"
+
+[[capabilities]]
+kind = "process:exec"
+command = "**/knip-language-server"
+args = ["--stdio", "--cwd", "**"]
+
+[[capabilities]]
+kind = "process:exec"
+command = "**/language-server"
+args = ["--stdio", "--cwd", "**"]
+
+[[capabilities]]
+kind = "process:exec"
+command = "**/knip"
+args = ["--stdio", "--cwd", "**"]
