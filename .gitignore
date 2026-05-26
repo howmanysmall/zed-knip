@@ -12,6 +12,7 @@
 
 .omo/
 docs/
+extension.wasm
 
 # opensrc - source code for packages
 opensrc/
