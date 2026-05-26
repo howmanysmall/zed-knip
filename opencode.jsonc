@@ -99,7 +99,7 @@
 	},
 	"formatter": {
 		"biome": {
-			"command": ["biome", "check", "--write", "$FILE"],
+			"command": ["mise", "x", "--", "aube", "run", "biome", "check", "--write", "$FILE"],
 			"disabled": false,
 			"extensions": [
 				".astro",
@@ -125,7 +125,7 @@
 			],
 		},
 		"oxfmt": {
-			"command": ["oxfmt", "$FILE"],
+			"command": ["mise", "x", "--", "aube", "run", "oxfmt", "$FILE"],
 			"disabled": false,
 			"environment": {},
 			"extensions": [
@@ -157,7 +157,7 @@
 			],
 		},
 		"rumdl": {
-			"command": ["rumdl", "check", "--fix", "$FILE"],
+			"command": ["mise", "x", "--", "rumdl", "check", "--fix", "$FILE"],
 			"disabled": false,
 			"extensions": [
 				".md",
@@ -173,7 +173,7 @@
 			],
 		},
 		"tombi": {
-			"command": ["tombi", "format", "$FILE"],
+			"command": ["mise", "x", "--", "tombi", "format", "$FILE"],
 			"disabled": false,
 			"extensions": [".toml"],
 		},
@@ -181,7 +181,7 @@
 	"instructions": ["./AGENTS.md"],
 	"lsp": {
 		"biome": {
-			"command": ["biome", "lsp-proxy"],
+			"command": ["mise", "x", "--", "aube", "run", "biome", "lsp-proxy"],
 			"disabled": false,
 			"env": {},
 			"extensions": [
@@ -208,7 +208,7 @@
 			],
 		},
 		"oxfmt": {
-			"command": ["oxfmt", "--lsp"],
+			"command": ["mise", "x", "--", "aube", "run", "oxfmt", "--lsp"],
 			"disabled": false,
 			"extensions": [
 				".cjs",
@@ -240,13 +240,13 @@
 			"initialization": {},
 		},
 		"oxlint": {
-			"command": ["oxlint", "--lsp"],
+			"command": ["mise", "x", "--", "aube", "run", "oxlint", "--lsp"],
 			"disabled": false,
 			"extensions": [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", ".vue", ".svelte", ".astro"],
 			"initialization": {},
 		},
 		"rumdl": {
-			"command": ["rumdl", "server"],
+			"command": ["mise", "x", "--", "rumdl", "server"],
 			"disabled": false,
 			"extensions": [
 				".md",
@@ -262,12 +262,12 @@
 			],
 		},
 		"rust-analyzer": {
-			"command": ["rust-analyzer"],
+			"command": ["mise", "x", "--", "rust-analyzer"],
 			"disabled": false,
 			"extensions": [".rs"],
 		},
 		"tombi": {
-			"command": ["tombi", "lsp"],
+			"command": ["mise", "x", "--", "tombi", "lsp"],
 			"disabled": false,
 			"extensions": [".toml"],
 		},
@@ -346,7 +346,7 @@
 					"limit": { "context": 200000, "output": 128000 },
 				},
 				"gpt-5.5": {
-					"limit": { "context": 400000, "output": 128000 },
+					"limit": { "context": 200000, "output": 128000 },
 				},
 			},
 		},
