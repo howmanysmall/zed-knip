@@ -38,6 +38,17 @@ impl zed::Extension for ZedKnipExtension {
 			&ProductionResolver,
 		)
 	}
+
+	fn language_server_initialization_options(
+		&mut self,
+		language_server_id: &zed::LanguageServerId,
+		worktree: &zed::Worktree,
+	) -> zed::Result<Option<zed::serde_json::Value>> {
+		language_server_initialization_options_for_worktree(
+			language_server_id.as_ref(),
+			&ZedWorktreeAdapter { worktree },
+		)
+	}
 }
 
 trait WorktreeAdapter {
@@ -110,6 +121,53 @@ fn language_server_command_for_worktree(
 	resolver
 		.resolve_command(&settings, &workspace_root)
 		.map_err(zed_visible_error)
+}
+
+fn language_server_initialization_options_for_worktree(
+	language_server_id: &str,
+	worktree: &impl WorktreeAdapter,
+) -> zed::Result<Option<zed::serde_json::Value>> {
+	if language_server_id != KNIP_LANGUAGE_SERVER_ID {
+		return Err(unsupported_language_server_error(language_server_id));
+	}
+
+	let workspace_root = worktree.root_path();
+	let settings = settings_for_workspace(&workspace_root, worktree.lsp_settings(language_server_id)?)?;
+
+	Ok(Some(knip_initialization_options(&settings)))
+}
+
+fn knip_initialization_options(settings: &KnipSettings) -> zed::serde_json::Value {
+	let mut config = zed::serde_json::json!({
+		"deferSession": false,
+		"editor": {
+			"exports": {
+				"codelens": { "enabled": true },
+				"hover": {
+					"enabled": true,
+					"includeImportLocationSnippet": false,
+					"maxSnippets": 10,
+					"timeout": 300
+				},
+				"quickfix": { "enabled": true },
+				"highlight": {
+					"dimExports": false,
+					"dimTypes": false,
+					"dimEnumMembers": false,
+					"dimClassMembers": false,
+					"dimDuplicates": false
+				}
+			}
+		},
+		"imports": { "enabled": true },
+		"exports": { "enabled": true, "contention": { "enabled": true } }
+	});
+
+	if let Some(config_path) = settings.config_path.as_deref() {
+		config["configFilePath"] = zed::serde_json::Value::String(config_path.to_string());
+	}
+
+	zed::serde_json::json!({ "config": config })
 }
 
 fn settings_for_workspace(
@@ -367,6 +425,23 @@ mod tests {
 		let error = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap_err();
 
 		assert!(error.contains("Managed Knip install failed"));
+	}
+
+	#[test]
+	fn language_server_initialization_options_include_detected_config_path() {
+		let worktree = TestWorktree::new("init-options-config");
+		let config = worktree.write("knip.ts", "export default {};\n");
+
+		let options = language_server_initialization_options_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree)
+			.unwrap()
+			.unwrap();
+		let expected_config_path = config.display().to_string();
+
+		assert_eq!(
+			options["config"]["configFilePath"].as_str(),
+			Some(expected_config_path.as_str())
+		);
+		assert_eq!(options["config"]["editor"]["exports"]["quickfix"]["enabled"], true);
 	}
 
 	#[test]
