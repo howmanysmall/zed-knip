@@ -107,10 +107,44 @@ fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
 #[cfg(test)]
 mod tests {
 	use super::{detect, PackageManager, PackageManagerError};
+	use std::fs;
 	use std::path::{Path, PathBuf};
+	use std::time::{SystemTime, UNIX_EPOCH};
 
 	fn fixture(name: &str) -> PathBuf {
 		Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
+	}
+
+	#[derive(Debug)]
+	struct TempWorkspace {
+		root: PathBuf,
+	}
+
+	impl TempWorkspace {
+		fn new(name: &str) -> Self {
+			let nanos = SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.unwrap_or_default()
+				.as_nanos();
+			let root = std::env::temp_dir().join(format!("zed-knip-package-manager-{name}-{nanos}"));
+			fs::create_dir_all(&root).unwrap_or_else(|error| panic!("failed to create {}: {error}", root.display()));
+			Self { root }
+		}
+
+		fn write(&self, relative_path: &str, contents: &str) {
+			let path = self.root.join(relative_path);
+			if let Some(parent) = path.parent() {
+				fs::create_dir_all(parent)
+					.unwrap_or_else(|error| panic!("failed to create {}: {error}", parent.display()));
+			}
+			fs::write(&path, contents).unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
+		}
+	}
+
+	impl Drop for TempWorkspace {
+		fn drop(&mut self) {
+			let _ = fs::remove_dir_all(&self.root);
+		}
 	}
 
 	#[test]
@@ -165,5 +199,16 @@ mod tests {
 			}
 			other => panic!("expected ambiguous error, got {other:?}"),
 		}
+	}
+
+	#[test]
+	fn perf_package_manager_detection_ignores_nested_lockfiles() {
+		let workspace = TempWorkspace::new("nested-lockfiles");
+		workspace.write("packages/app/package-lock.json", "{}");
+		workspace.write("packages/app/pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+
+		let error = detect(&workspace.root).unwrap_err();
+
+		assert_eq!(error, PackageManagerError::NotFound);
 	}
 }

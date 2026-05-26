@@ -564,6 +564,41 @@ mod tests {
 	}
 
 	#[test]
+	fn perf_command_builder_creates_one_language_server_process_per_worktree() {
+		let workspace = TestWorkspace::new("single-process");
+		workspace.package_json("npm");
+		let executable = workspace.executable("node_modules/.bin/knip-language-server");
+		let resolved = ResolvedKnip {
+			executable_path: executable.clone(),
+			package_manager: PackageManager::Npm,
+			install_source: InstallSource::WorkspaceLocal,
+		};
+
+		let command = build_language_server_command(&resolved, &KnipSettings::default(), &workspace.root);
+
+		assert_eq!(command.command.command, executable.display().to_string());
+		assert_eq!(
+			command
+				.command
+				.args
+				.iter()
+				.filter(|arg| arg.as_str() == "--cwd")
+				.count(),
+			1
+		);
+		assert_eq!(
+			command
+				.command
+				.args
+				.iter()
+				.filter(|arg| arg.as_str() == "--stdio")
+				.count(),
+			1
+		);
+		assert_eq!(command.working_dir, workspace.root);
+	}
+
+	#[test]
 	fn resolver_rejects_managed_cache_non_executable() {
 		let workspace = TestWorkspace::new("managed-non-executable");
 		workspace.package_json("npm");

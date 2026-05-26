@@ -172,6 +172,19 @@ mod tests {
 				CacheState::Stale(StaleReason::SettingsChanged)
 			);
 		}
+
+		#[test]
+		fn perf_cache_invalidation_is_limited_to_known_inputs() {
+			let cache = valid_cache();
+			let current = InvalidationInputs {
+				package_json_mtime: Some(time(10)),
+				lockfile_mtime: Some(time(20)),
+				knip_config_mtime: Some(time(30)),
+				settings_hash: 42,
+			};
+
+			assert_eq!(cache.check_validity(&current), CacheState::Hit);
+		}
 	}
 
 	mod cache_corrupt {
