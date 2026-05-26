@@ -670,4 +670,157 @@ mod tests {
 
 		assert!(path.is_file());
 	}
+
+	#[test]
+	fn resolver_workspace_root_with_spaces_resolves_workspace_local() {
+		let workspace = TestWorkspace::new("path with spaces");
+		workspace.package_json("npm");
+		let local = workspace.executable("node_modules/.bin/knip-language-server");
+
+		let resolved = resolve_knip(
+			&KnipSettings::default(),
+			&cache(&workspace.root),
+			&ManagedInstallDisabled,
+		)
+		.unwrap();
+
+		assert_eq!(resolved.executable_path, local);
+		assert!(
+			resolved.executable_path.display().to_string().contains(' '),
+			"executable path must contain a space"
+		);
+	}
+
+	#[test]
+	fn resolver_absolute_explicit_path_with_spaces_is_accepted() {
+		let workspace = TestWorkspace::new("explicit path with spaces");
+		workspace.package_json("npm");
+		let explicit = workspace.executable("tools/knip language server");
+		let settings = KnipSettings {
+			server_path: Some(explicit.display().to_string()),
+			..KnipSettings::default()
+		};
+
+		let resolved = resolve_knip(&settings, &cache(&workspace.root), &ManagedInstallDisabled).unwrap();
+
+		assert_eq!(resolved.executable_path, explicit);
+		assert_eq!(resolved.install_source, InstallSource::ExplicitPath);
+	}
+
+	#[test]
+	fn resolver_relative_explicit_path_with_spaces_is_joined_to_workspace_root() {
+		let workspace = TestWorkspace::new("relative-spaces");
+		workspace.package_json("npm");
+		let explicit = workspace.executable("my tools/knip-language-server");
+		let settings = KnipSettings {
+			server_path: Some("my tools/knip-language-server".to_string()),
+			..KnipSettings::default()
+		};
+
+		let resolved = resolve_knip(&settings, &cache(&workspace.root), &ManagedInstallDisabled).unwrap();
+
+		assert_eq!(resolved.executable_path, explicit);
+		assert_eq!(resolved.install_source, InstallSource::ExplicitPath);
+	}
+
+	#[test]
+	fn command_builder_encodes_path_with_spaces_as_display_string() {
+		let workspace = TestWorkspace::new("cmd spaces");
+		workspace.package_json("npm");
+		let executable = workspace.executable("node_modules/.bin/knip-language-server");
+		let resolved = ResolvedKnip {
+			executable_path: executable.clone(),
+			package_manager: PackageManager::Npm,
+			install_source: InstallSource::WorkspaceLocal,
+		};
+
+		let command = build_language_server_command(&resolved, &KnipSettings::default(), &workspace.root);
+
+		let root_str = workspace.root.display().to_string();
+		assert!(
+			root_str.contains(' '),
+			"workspace root must contain a space for this test"
+		);
+		assert_eq!(command.command.command, executable.display().to_string());
+		assert!(command.command.args.contains(&root_str));
+		assert_eq!(
+			command
+				.command
+				.env
+				.iter()
+				.find(|(k, _)| k == "PWD")
+				.map(|(_, v)| v.as_str()),
+			Some(root_str.as_str())
+		);
+	}
+
+	#[test]
+	fn resolver_cache_with_spaces_in_executable_path_is_used() {
+		let workspace = TestWorkspace::new("cache-spaces");
+		workspace.package_json("bun");
+		let cached = workspace.executable("my cache dir/knip-language-server");
+		let mut cache = cache(&workspace.root);
+		cache.executable_path = Some(cached.clone());
+		cache.install_source = InstallSource::ManagedCache;
+
+		let resolved = resolve_knip(&KnipSettings::default(), &cache, &ManagedInstallDisabled).unwrap();
+
+		assert_eq!(resolved.executable_path, cached);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn resolver_follows_symlink_to_workspace_local_executable() {
+		use std::os::unix::fs::symlink;
+
+		let workspace = TestWorkspace::new("symlink-resolver");
+		workspace.package_json("pnpm");
+		let real = workspace.executable("real/knip-language-server");
+		let link_dir = workspace.root.join("node_modules").join(".bin");
+		fs::create_dir_all(&link_dir)
+			.unwrap_or_else(|error| panic!("failed to create {}: {error}", link_dir.display()));
+		let link = link_dir.join("knip-language-server");
+		symlink(&real, &link).unwrap_or_else(|error| panic!("failed to create symlink {}: {error}", link.display()));
+
+		let resolved = resolve_knip(
+			&KnipSettings::default(),
+			&cache(&workspace.root),
+			&ManagedInstallDisabled,
+		)
+		.unwrap();
+
+		assert_eq!(resolved.executable_path, link);
+		assert_eq!(resolved.install_source, InstallSource::WorkspaceLocal);
+	}
+
+	#[test]
+	fn resolve_configured_path_returns_absolute_path_unchanged() {
+		let workspace = TestWorkspace::new("abs-path-unchanged");
+		let absolute = workspace.root.join("tools").join("knip");
+
+		let result = resolve_configured_path(&workspace.root, &absolute.display().to_string());
+
+		assert_eq!(result, absolute);
+		assert!(result.is_absolute());
+	}
+
+	#[test]
+	fn resolve_configured_path_joins_relative_path_to_workspace_root() {
+		let workspace = TestWorkspace::new("rel-path-join");
+
+		let result = resolve_configured_path(&workspace.root, "tools/knip");
+
+		assert_eq!(result, workspace.root.join("tools").join("knip"));
+		assert!(result.is_absolute());
+	}
+
+	#[test]
+	fn resolve_configured_path_handles_relative_path_with_spaces() {
+		let workspace = TestWorkspace::new("rel-spaces-join");
+
+		let result = resolve_configured_path(&workspace.root, "my tools/knip language server");
+
+		assert_eq!(result, workspace.root.join("my tools").join("knip language server"));
+	}
 }

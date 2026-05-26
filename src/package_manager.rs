@@ -211,4 +211,73 @@ mod tests {
 
 		assert_eq!(error, PackageManagerError::NotFound);
 	}
+
+	#[test]
+	fn package_manager_detects_npm_in_path_with_spaces_fixture() {
+		let manager = detect(&fixture("path with spaces")).unwrap();
+
+		assert_eq!(manager, PackageManager::Npm);
+	}
+
+	#[test]
+	fn package_manager_detects_npm_in_temp_dir_with_spaces_in_path() {
+		let workspace = TempWorkspace::new("dir with spaces");
+		workspace.write("package-lock.json", "{}");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Npm);
+	}
+
+	#[test]
+	fn package_manager_path_is_always_pathbuf_not_string_concatenation() {
+		let workspace = TempWorkspace::new("spaces in name");
+		workspace.write("yarn.lock", "");
+
+		let root: &Path = &workspace.root;
+		let manager = detect(root).unwrap();
+
+		assert_eq!(manager, PackageManager::Yarn);
+	}
+
+	#[test]
+	fn package_manager_detects_bun_in_deeply_nested_path_with_spaces() {
+		let workspace = TempWorkspace::new("outer dir/inner dir");
+		workspace.write("bun.lockb", "");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Bun);
+	}
+
+	#[test]
+	fn package_manager_relative_path_resolves_correctly() {
+		let abs_path = fixture("npm");
+
+		assert!(abs_path.is_absolute(), "fixture path must be absolute");
+		let manager = detect(&abs_path).unwrap();
+		assert_eq!(manager, PackageManager::Npm);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn package_manager_detects_through_symlinked_workspace_root() {
+		use std::os::unix::fs::symlink;
+
+		let workspace = TempWorkspace::new("symlink-target");
+		workspace.write("pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+
+		let nanos = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.unwrap_or_default()
+			.as_nanos();
+		let link_path = std::env::temp_dir().join(format!("zed-knip-symlink-{nanos}"));
+		symlink(&workspace.root, &link_path)
+			.unwrap_or_else(|error| panic!("failed to create symlink {}: {error}", link_path.display()));
+
+		let manager = detect(&link_path).unwrap();
+		let _ = fs::remove_file(&link_path);
+
+		assert_eq!(manager, PackageManager::Pnpm);
+	}
 }
