@@ -23,6 +23,9 @@ fn perf_package_manager_detection_uses_bounded_named_file_checks() {
 		"pnpm-lock.yaml",
 		"yarn.lock",
 		"bun.lock",
+		"deno.lock",
+		"vlt-lock.json",
+		"aube-lock.yaml",
 	] {
 		assert!(
 			PACKAGE_MANAGER_SOURCE.contains(file_name),

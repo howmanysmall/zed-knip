@@ -1,7 +1,7 @@
 id = "zed-knip"
 name = "Zed Knip"
 description = "Zed extension support for Knip LSP integration"
-version = "0.1.0"
+version = "0.2.0"
 schema_version = 1
 authors = ["HowManySmall"]
 repository = "https://github.com/howmanysmall/zed-knip"

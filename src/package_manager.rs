@@ -6,6 +6,9 @@ pub enum PackageManager {
 	Pnpm,
 	Yarn,
 	Bun,
+	Deno,
+	Vlt,
+	Aube,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +23,9 @@ pub const LOCKFILES: &[(&str, PackageManager)] = &[
 	("pnpm-lock.yaml", PackageManager::Pnpm),
 	("yarn.lock", PackageManager::Yarn),
 	("bun.lock", PackageManager::Bun),
+	("deno.lock", PackageManager::Deno),
+	("vlt-lock.json", PackageManager::Vlt),
+	("aube-lock.yaml", PackageManager::Aube),
 ];
 
 impl fmt::Display for PackageManagerError {
@@ -96,6 +102,9 @@ fn parse_package_manager(value: &str) -> Result<PackageManager, PackageManagerEr
 		"pnpm" => Ok(PackageManager::Pnpm),
 		"yarn" => Ok(PackageManager::Yarn),
 		"bun" => Ok(PackageManager::Bun),
+		"deno" => Ok(PackageManager::Deno),
+		"vlt" => Ok(PackageManager::Vlt),
+		"aube" => Ok(PackageManager::Aube),
 		_ => Err(PackageManagerError::UnsupportedPackageManager {
 			found: value.to_string(),
 		}),
@@ -180,10 +189,42 @@ mod tests {
 	}
 
 	#[test]
+	fn package_manager_detects_deno_fixture() {
+		let manager = detect(&fixture("deno")).unwrap();
+
+		assert_eq!(manager, PackageManager::Deno);
+	}
+
+	#[test]
+	fn package_manager_detects_vlt_fixture() {
+		let manager = detect(&fixture("vlt")).unwrap();
+
+		assert_eq!(manager, PackageManager::Vlt);
+	}
+
+	#[test]
+	fn package_manager_detects_aube_fixture() {
+		let manager = detect(&fixture("aube")).unwrap();
+
+		assert_eq!(manager, PackageManager::Aube);
+	}
+
+	#[test]
 	fn package_manager_detects_package_manager_field() {
 		let manager = detect(&fixture("package-manager-field")).unwrap();
 
 		assert_eq!(manager, PackageManager::Pnpm);
+	}
+
+	#[test]
+	fn package_manager_field_wins_over_lockfile() {
+		let workspace = TempWorkspace::new("package-manager-precedence");
+		workspace.write("package.json", r#"{"packageManager":"aube@1.15.0"}"#);
+		workspace.write("bun.lock", "");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Aube);
 	}
 
 	#[test]
@@ -273,6 +314,16 @@ mod tests {
 		let manager = detect(&workspace.root).unwrap();
 
 		assert_eq!(manager, PackageManager::Bun);
+	}
+
+	#[test]
+	fn package_manager_detects_deno_in_deeply_nested_path_with_spaces() {
+		let workspace = TempWorkspace::new("outer dir/inner dir");
+		workspace.write("deno.lock", "");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Deno);
 	}
 
 	#[test]

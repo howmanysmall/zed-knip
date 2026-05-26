@@ -192,6 +192,9 @@ fn parse_package_manager_setting(package_manager: &str) -> Result<PackageManager
 		"pnpm" => Ok(PackageManager::Pnpm),
 		"yarn" => Ok(PackageManager::Yarn),
 		"bun" => Ok(PackageManager::Bun),
+		"deno" => Ok(PackageManager::Deno),
+		"vlt" => Ok(PackageManager::Vlt),
+		"aube" => Ok(PackageManager::Aube),
 		found => Err(KnipError::UnsupportedPackageManager {
 			found: found.to_string(),
 		}),
@@ -353,6 +356,9 @@ impl fmt::Display for PackageManager {
 			Self::Pnpm => f.write_str("pnpm"),
 			Self::Yarn => f.write_str("yarn"),
 			Self::Bun => f.write_str("bun"),
+			Self::Deno => f.write_str("deno"),
+			Self::Vlt => f.write_str("vlt"),
+			Self::Aube => f.write_str("aube"),
 		}
 	}
 }

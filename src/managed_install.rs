@@ -340,6 +340,9 @@ fn package_manager_name(package_manager: PackageManager) -> &'static str {
 		PackageManager::Pnpm => "pnpm",
 		PackageManager::Yarn => "yarn",
 		PackageManager::Bun => "bun",
+		PackageManager::Deno => "deno",
+		PackageManager::Vlt => "vlt",
+		PackageManager::Aube => "aube",
 	}
 }
 

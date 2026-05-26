@@ -503,6 +503,22 @@ mod tests {
 	}
 
 	#[test]
+	fn language_server_command_package_manager_field_wins_over_lockfile_through_worktree_api() {
+		let worktree = TestWorktree::new("package-manager-precedence");
+		worktree.write("package.json", "{\"packageManager\":\"aube@1.15.0\"}\n");
+		worktree.write("bun.lock", "");
+		let executable = worktree.executable("node_modules/.bin/knip-language-server");
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(command.command, executable.display().to_string());
+		assert!(command
+			.env
+			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "aube".to_string())));
+	}
+
+	#[test]
 	fn language_server_command_surfaces_resolver_errors_to_zed() {
 		let worktree = TestWorktree::new("resolver-error");
 		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");

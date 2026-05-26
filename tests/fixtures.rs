@@ -16,6 +16,9 @@ fn fixture_inventory() {
 		"pnpm",
 		"yarn",
 		"bun",
+		"deno",
+		"vlt",
+		"aube",
 		"monorepo",
 		"missing-knip",
 		"invalid-config",
@@ -42,7 +45,7 @@ fn fixture_inventory() {
 		assert!(actual.contains(name), "fixture not discoverable: {name}");
 	}
 
-	assert_eq!(actual.len(), 12, "unexpected fixture inventory: {actual:?}");
+	assert_eq!(actual.len(), 15, "unexpected fixture inventory: {actual:?}");
 }
 
 #[test]
