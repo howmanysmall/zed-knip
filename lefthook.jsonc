@@ -21,12 +21,16 @@
 	"pre-commit": {
 		"jobs": [
 			{
+				"name": "Write Aube Version",
+				"run": "aube --version",
+			},
+			{
 				"group": {
 					"jobs": [
 						{
 							"glob": ["**/*.json", "**/*.jsonc"],
 							"name": "biome-fix",
-							"run": "aube run biome check --write --no-errors-on-unmatched {staged_files}",
+							"run": "mise x -- aube run biome check --write --no-errors-on-unmatched {staged_files}",
 							"stage_fixed": true,
 						},
 						{
@@ -47,7 +51,7 @@
 								"**/*.yml",
 							],
 							"name": "oxfmt",
-							"run": "aube run oxfmt {staged_files}",
+							"run": "mise x -- aube run oxfmt {staged_files}",
 							"stage_fixed": true,
 						},
 						{
@@ -78,7 +82,7 @@
 						{
 							"glob": ["**/*.json", "**/*.jsonc"],
 							"name": "oxfmt-json",
-							"run": "aube run oxfmt {staged_files}",
+							"run": "mise x -- aube run oxfmt {staged_files}",
 							"stage_fixed": true,
 						},
 					],

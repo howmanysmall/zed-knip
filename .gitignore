@@ -10,6 +10,9 @@
 .lefthook/
 .envrc
 
+.omo/
+docs/
+
 # opensrc - source code for packages
 opensrc/
 
