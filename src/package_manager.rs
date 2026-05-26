@@ -15,6 +15,13 @@ pub enum PackageManagerError {
 	UnsupportedPackageManager { found: String },
 }
 
+pub const LOCKFILES: &[(&str, PackageManager)] = &[
+	("package-lock.json", PackageManager::Npm),
+	("pnpm-lock.yaml", PackageManager::Pnpm),
+	("yarn.lock", PackageManager::Yarn),
+	("bun.lock", PackageManager::Bun),
+];
+
 impl fmt::Display for PackageManagerError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -35,24 +42,27 @@ impl fmt::Display for PackageManagerError {
 impl std::error::Error for PackageManagerError {}
 
 pub fn detect(workspace_root: &Path) -> Result<PackageManager, PackageManagerError> {
-	if let Some(manager) = detect_from_package_json(workspace_root) {
-		return manager;
+	let package_json = fs::read_to_string(workspace_root.join("package.json")).ok();
+	detect_from_workspace_files(package_json.as_deref(), |lockfile| {
+		workspace_root.join(lockfile).is_file()
+	})
+}
+
+pub fn detect_from_workspace_files(
+	package_json: Option<&str>,
+	mut lockfile_exists: impl FnMut(&str) -> bool,
+) -> Result<PackageManager, PackageManagerError> {
+	if let Some(package_json) = package_json {
+		if let Some(manager) = detect_from_package_json_contents(package_json) {
+			return manager;
+		}
 	}
 
-	let mut found = Vec::new();
-
-	if workspace_root.join("package-lock.json").is_file() {
-		found.push("package-lock.json".to_string());
-	}
-	if workspace_root.join("pnpm-lock.yaml").is_file() {
-		found.push("pnpm-lock.yaml".to_string());
-	}
-	if workspace_root.join("yarn.lock").is_file() {
-		found.push("yarn.lock".to_string());
-	}
-	if workspace_root.join("bun.lock").is_file() {
-		found.push("bun.lock".to_string());
-	}
+	let found = LOCKFILES
+		.iter()
+		.filter(|(lockfile, _)| lockfile_exists(lockfile))
+		.map(|(lockfile, _)| (*lockfile).to_string())
+		.collect::<Vec<_>>();
 
 	match found.as_slice() {
 		[] => Err(PackageManagerError::NotFound),
@@ -64,10 +74,8 @@ pub fn detect(workspace_root: &Path) -> Result<PackageManager, PackageManagerErr
 	}
 }
 
-fn detect_from_package_json(workspace_root: &Path) -> Option<Result<PackageManager, PackageManagerError>> {
-	let package_json = workspace_root.join("package.json");
-	let contents = fs::read_to_string(package_json).ok()?;
-	let manager = extract_package_manager_field(&contents)?;
+fn detect_from_package_json_contents(contents: &str) -> Option<Result<PackageManager, PackageManagerError>> {
+	let manager = extract_package_manager_field(contents)?;
 	Some(parse_package_manager(&manager))
 }
 
@@ -95,13 +103,9 @@ fn parse_package_manager(value: &str) -> Result<PackageManager, PackageManagerEr
 }
 
 fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
-	match lockfile {
-		"package-lock.json" => Some(PackageManager::Npm),
-		"pnpm-lock.yaml" => Some(PackageManager::Pnpm),
-		"yarn.lock" => Some(PackageManager::Yarn),
-		"bun.lock" => Some(PackageManager::Bun),
-		_ => None,
-	}
+	LOCKFILES
+		.iter()
+		.find_map(|(candidate, manager)| (*candidate == lockfile).then_some(*manager))
 }
 
 #[cfg(test)]

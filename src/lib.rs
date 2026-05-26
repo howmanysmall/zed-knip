@@ -10,8 +10,9 @@ pub mod settings;
 
 use crate::{
 	cache::WorktreeCache,
-	config_detection::detect_config,
+	config_detection::known_config_file_names,
 	errors::KnipError,
+	package_manager::PackageManagerError,
 	resolver::{build_language_server_command, resolve_knip, ZedNpmManagedInstall},
 	settings::{KnipSettings, LogLevel},
 };
@@ -49,11 +50,23 @@ impl zed::Extension for ZedKnipExtension {
 			&ZedWorktreeAdapter { worktree },
 		)
 	}
+
+	fn language_server_workspace_configuration(
+		&mut self,
+		language_server_id: &zed::LanguageServerId,
+		worktree: &zed::Worktree,
+	) -> zed::Result<Option<zed::serde_json::Value>> {
+		language_server_workspace_configuration_for_worktree(
+			language_server_id.as_ref(),
+			&ZedWorktreeAdapter { worktree },
+		)
+	}
 }
 
 trait WorktreeAdapter {
 	fn root_path(&self) -> PathBuf;
 	fn lsp_settings(&self, language_server_id: &str) -> zed::Result<Option<ZedKnipSettings>>;
+	fn read_text_file(&self, relative_path: &str) -> Option<String>;
 }
 
 trait CommandResolver {
@@ -88,6 +101,10 @@ impl WorktreeAdapter for ZedWorktreeAdapter<'_> {
 		let settings = zed::settings::LspSettings::for_worktree(language_server_id, self.worktree)?;
 		Ok(Some(ZedKnipSettings::from_lsp_settings(settings)?))
 	}
+
+	fn read_text_file(&self, relative_path: &str) -> Option<String> {
+		self.worktree.read_text_file(relative_path).ok()
+	}
 }
 
 struct ProductionResolver;
@@ -115,8 +132,8 @@ fn language_server_command_for_worktree(
 		return Err(unsupported_language_server_error(language_server_id));
 	}
 
+	let settings = settings_for_worktree(worktree, worktree.lsp_settings(language_server_id)?)?;
 	let workspace_root = worktree.root_path();
-	let settings = settings_for_workspace(&workspace_root, worktree.lsp_settings(language_server_id)?)?;
 
 	resolver
 		.resolve_command(&settings, &workspace_root)
@@ -131,13 +148,29 @@ fn language_server_initialization_options_for_worktree(
 		return Err(unsupported_language_server_error(language_server_id));
 	}
 
-	let workspace_root = worktree.root_path();
-	let settings = settings_for_workspace(&workspace_root, worktree.lsp_settings(language_server_id)?)?;
+	let settings = settings_for_worktree(worktree, worktree.lsp_settings(language_server_id)?)?;
 
 	Ok(Some(knip_initialization_options(&settings)))
 }
 
+fn language_server_workspace_configuration_for_worktree(
+	language_server_id: &str,
+	worktree: &impl WorktreeAdapter,
+) -> zed::Result<Option<zed::serde_json::Value>> {
+	if language_server_id != KNIP_LANGUAGE_SERVER_ID {
+		return Err(unsupported_language_server_error(language_server_id));
+	}
+
+	let settings = settings_for_worktree(worktree, worktree.lsp_settings(language_server_id)?)?;
+
+	Ok(Some(knip_workspace_configuration(&settings)))
+}
+
 fn knip_initialization_options(settings: &KnipSettings) -> zed::serde_json::Value {
+	zed::serde_json::json!({ "config": knip_workspace_configuration(settings) })
+}
+
+fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Value {
 	let mut config = zed::serde_json::json!({
 		"deferSession": false,
 		"editor": {
@@ -167,11 +200,11 @@ fn knip_initialization_options(settings: &KnipSettings) -> zed::serde_json::Valu
 		config["configFilePath"] = zed::serde_json::Value::String(config_path.to_string());
 	}
 
-	zed::serde_json::json!({ "config": config })
+	config
 }
 
-fn settings_for_workspace(
-	workspace_root: &std::path::Path,
+fn settings_for_worktree(
+	worktree: &impl WorktreeAdapter,
 	overrides: Option<ZedKnipSettings>,
 ) -> zed::Result<KnipSettings> {
 	let mut settings = KnipSettings::default();
@@ -179,12 +212,50 @@ fn settings_for_workspace(
 		settings = apply_zed_settings(settings, overrides);
 	}
 
+	let workspace_root = worktree.root_path();
 	if settings.config_path.is_none() {
-		settings.config_path = detect_config(workspace_root).map(|path| path.display().to_string());
+		settings.config_path = detect_config_for_worktree(worktree)
+			.map(|relative_path| workspace_root.join(relative_path).display().to_string());
+	}
+
+	if settings.package_manager.is_none() {
+		settings.package_manager = Some(detect_package_manager_for_worktree(worktree)?.to_string());
 	}
 
 	settings.validate().map_err(|error| error.to_string())?;
 	Ok(settings)
+}
+
+fn detect_config_for_worktree(worktree: &impl WorktreeAdapter) -> Option<&'static str> {
+	known_config_file_names()
+		.iter()
+		.copied()
+		.find(|file_name| worktree.read_text_file(file_name).is_some())
+}
+
+fn detect_package_manager_for_worktree(
+	worktree: &impl WorktreeAdapter,
+) -> zed::Result<package_manager::PackageManager> {
+	let package_json = worktree.read_text_file("package.json");
+	package_manager::detect_from_workspace_files(package_json.as_deref(), |lockfile| {
+		worktree.read_text_file(lockfile).is_some()
+	})
+	.map_err(package_manager_error_to_zed_error)
+}
+
+fn package_manager_error_to_zed_error(error: PackageManagerError) -> String {
+	match error {
+		PackageManagerError::NotFound => {
+			"No supported package manager lockfile or packageManager field was found.".to_string()
+		}
+		PackageManagerError::Ambiguous { found } => format!(
+			"Multiple package managers were detected ({}). Remove the extra lockfile(s) or set the package manager explicitly in settings.",
+			found.join(", ")
+		),
+		PackageManagerError::UnsupportedPackageManager { found } => {
+			format!("Unsupported package manager {found}. Use npm, pnpm, yarn, or bun.")
+		}
+	}
 }
 
 fn apply_zed_settings(mut settings: KnipSettings, overrides: ZedKnipSettings) -> KnipSettings {
@@ -328,6 +399,10 @@ mod tests {
 		fn lsp_settings(&self, _language_server_id: &str) -> zed::Result<Option<ZedKnipSettings>> {
 			Ok(None)
 		}
+
+		fn read_text_file(&self, relative_path: &str) -> Option<String> {
+			fs::read_to_string(self.root.join(relative_path)).ok()
+		}
 	}
 
 	#[derive(Debug, Clone)]
@@ -413,6 +488,21 @@ mod tests {
 	}
 
 	#[test]
+	fn language_server_command_detects_bun_lock_through_worktree_api() {
+		let worktree = TestWorktree::new("bun-lock");
+		worktree.write("bun.lock", "");
+		let executable = worktree.executable("node_modules/.bin/knip-language-server");
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(command.command, executable.display().to_string());
+		assert!(command
+			.env
+			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "bun".to_string())));
+	}
+
+	#[test]
 	fn language_server_command_surfaces_resolver_errors_to_zed() {
 		let worktree = TestWorktree::new("resolver-error");
 		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
@@ -430,6 +520,7 @@ mod tests {
 	#[test]
 	fn language_server_initialization_options_include_detected_config_path() {
 		let worktree = TestWorktree::new("init-options-config");
+		worktree.write("bun.lock", "");
 		let config = worktree.write("knip.ts", "export default {};\n");
 
 		let options = language_server_initialization_options_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree)
@@ -445,8 +536,27 @@ mod tests {
 	}
 
 	#[test]
+	fn language_server_workspace_configuration_includes_detected_config_path() {
+		let worktree = TestWorktree::new("workspace-config");
+		worktree.write("bun.lock", "");
+		let config = worktree.write("knip.ts", "export default {};\n");
+
+		let configuration = language_server_workspace_configuration_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree)
+			.unwrap()
+			.unwrap();
+		let expected_config_path = config.display().to_string();
+
+		assert_eq!(
+			configuration["configFilePath"].as_str(),
+			Some(expected_config_path.as_str())
+		);
+		assert_eq!(configuration["editor"]["exports"]["quickfix"]["enabled"], true);
+	}
+
+	#[test]
 	fn language_server_command_maps_mocked_resolver_error_to_zed_message() {
 		let worktree = TestWorktree::new("mock-error");
+		worktree.write("bun.lock", "");
 		let resolver = MockResolver {
 			result: Err(KnipError::UnsupportedWorkspace {
 				reason: "missing package.json".to_string(),
