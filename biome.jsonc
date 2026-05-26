@@ -32,7 +32,7 @@
 	},
 
 	"files": {
-		"includes": ["**", "!**/package.json", "!skills-lock.json", "!**/.gemini", "!**/.omo"]
+		"includes": ["**", "!**/package.json", "!skills-lock.json", "!**/.gemini", "!**/.omo", "!tests/fixtures"]
 	},
 
 	"formatter": {

@@ -12,7 +12,8 @@
 		".github/workflows/release.yml",
 		"**/aube-lock.yaml",
 		"skills-lock.json",
-		".vscode/*.json"
+		".vscode/*.json",
+		"tests/fixtures/**"
 	],
 	"insertFinalNewline": true,
 	"jsdoc": {

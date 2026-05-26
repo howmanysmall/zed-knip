@@ -1,0 +1,8 @@
+{
+	"name": "yarn",
+	"version": "1.0.0",
+	"dependencies": {
+		"cowsay": "^1.6.0"
+	},
+	"packageManager": "yarn@1.22.22"
+}

@@ -21,10 +21,6 @@
 	"pre-commit": {
 		"jobs": [
 			{
-				"name": "Write Aube Version",
-				"run": "aube --version",
-			},
-			{
 				"group": {
 					"jobs": [
 						{
@@ -51,19 +47,19 @@
 								"**/*.yml",
 							],
 							"name": "oxfmt",
-							"run": "mise x -- aube run oxfmt {staged_files}",
+							"run": "mise x -- aube run oxfmt --no-error-on-unmatched-pattern {staged_files}",
 							"stage_fixed": true,
 						},
 						{
 							"glob": "**/*.md",
 							"name": "rumdl-fix",
-							"run": "mise x -- rumdl fmt {staged_files}\nrumdl check {staged_files}\n",
+							"run": "mise x -- rumdl fmt {staged_files}\nmise x -- rumdl check {staged_files}\n",
 							"stage_fixed": true,
 						},
 						{
 							"glob": "**/*.toml",
 							"name": "tombi-fix",
-							"run": "mise x -- tombi format {staged_files}\ntombi lint {staged_files}\n",
+							"run": "mise x -- tombi format {staged_files}\nmise x -- tombi lint {staged_files}\n",
 							"stage_fixed": true,
 						},
 						{
@@ -82,7 +78,7 @@
 						{
 							"glob": ["**/*.json", "**/*.jsonc"],
 							"name": "oxfmt-json",
-							"run": "mise x -- aube run oxfmt {staged_files}",
+							"run": "mise x -- aube run oxfmt --no-error-on-unmatched-pattern {staged_files}",
 							"stage_fixed": true,
 						},
 					],

@@ -1,0 +1,8 @@
+{
+	"name": "pnpm",
+	"version": "1.0.0",
+	"dependencies": {
+		"cowsay": "^1.6.0"
+	},
+	"packageManager": "pnpm@11.3.0"
+}
