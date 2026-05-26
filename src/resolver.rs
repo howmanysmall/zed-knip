@@ -5,7 +5,7 @@ use crate::{
 	settings::KnipSettings,
 };
 use std::{
-	fmt, fs,
+	fmt,
 	path::{Path, PathBuf},
 };
 use zed_extension_api as zed;
@@ -228,7 +228,7 @@ fn validate_candidate_path(path: &Path) -> Result<(), KnipError> {
 fn is_executable(path: &Path) -> bool {
 	use std::os::unix::fs::PermissionsExt;
 
-	fs::metadata(path)
+	std::fs::metadata(path)
 		.map(|metadata| metadata.permissions().mode() & 0o111 != 0)
 		.unwrap_or(false)
 }

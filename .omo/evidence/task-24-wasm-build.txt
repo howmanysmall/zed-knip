@@ -1,0 +1,2 @@
+-rwxr-xr-x  1 loganhamilton  staff   249K May 25 22:45 target/wasm32-wasip1/release/zed_knip.wasm
+WASM artifact verified

@@ -1,0 +1,233 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+────────────
+ Nextest run ID 99e43054-b350-4220-8a8c-d27a614d351d with nextest profile: default
+    Starting 227 tests across 5 binaries
+        PASS [   0.010s] (  1/227) zed-knip config_detection::tests::detect_config_finds_nested_package_config_when_nested_root_is_used
+        PASS [   0.010s] (  2/227) zed-knip cache::tests::cache_corrupt::cache_read_only_returns_actionable_error
+        PASS [   0.011s] (  3/227) zed-knip cache::tests::cache_invalidation::cache_is_isolated_by_monorepo_worktree_root
+        PASS [   0.011s] (  4/227) zed-knip cache::tests::cache_invalidation::cache_stale_on_settings_change
+        PASS [   0.011s] (  5/227) zed-knip cache::tests::cache_corrupt::cache_corrupt_returns_actionable_error
+        PASS [   0.011s] (  6/227) zed-knip cache::tests::cache_invalidation::cache_validity_does_not_reuse_inputs_from_another_worktree
+        PASS [   0.012s] (  7/227) zed-knip cache::tests::cache_invalidation::perf_cache_invalidation_is_limited_to_known_inputs
+        PASS [   0.011s] (  8/227) zed-knip config_detection::tests::detect_config_finds_monorepo_root_config_without_nested_scan
+        PASS [   0.012s] (  9/227) zed-knip cache::tests::cache_invalidation::cache_stale_on_config_change
+        PASS [   0.012s] ( 10/227) zed-knip cache::tests::cache_invalidation::cache_miss_when_entry_incomplete
+        PASS [   0.012s] ( 11/227) zed-knip cache::tests::cache_invalidation::cache_hit_when_inputs_unchanged
+        PASS [   0.012s] ( 12/227) zed-knip config_detection::tests::detect_config_ignores_nested_files_to_keep_checks_bounded
+        PASS [   0.015s] ( 13/227) zed-knip config_detection::tests::detect_config_finds_first_supported_root_file
+        PASS [   0.015s] ( 14/227) zed-knip cache::tests::cache_invalidation::cache_stale_on_package_json_change
+        PASS [   0.010s] ( 15/227) zed-knip config_detection::tests::detect_config_nested_package_without_config_does_not_inherit_monorepo_root_config
+        PASS [   0.008s] ( 16/227) zed-knip errors::tests::error_missing_knip_failed_managed_install_display
+        PASS [   0.009s] ( 17/227) zed-knip errors::tests::error_missing_knip_display_mentions_workspace_install_path_and_managed_install
+        PASS [   0.009s] ( 18/227) zed-knip errors::tests::error_missing_knip_invalid_explicit_path_display
+        PASS [   0.009s] ( 19/227) zed-knip errors::tests::error_missing_knip_network_unavailable_display
+        PASS [   0.009s] ( 20/227) zed-knip logging::tests::install_progress_downloading_display_includes_version
+        PASS [   0.013s] ( 21/227) zed-knip config_detection::tests::detect_config_supports_dot_kniprc_variants
+        PASS [   0.011s] ( 22/227) zed-knip errors::tests::error_missing_knip_read_only_cache_display
+        PASS [   0.013s] ( 23/227) zed-knip logging::tests::install_progress_cache_hit_display_includes_version
+        PASS [   0.009s] ( 24/227) zed-knip logging::tests::install_progress_ready_display_includes_path
+        PASS [   0.013s] ( 25/227) zed-knip errors::tests::error_missing_knip_language_server_crash_display
+        PASS [   0.014s] ( 26/227) zed-knip config_detection::tests::known_config_file_names_are_bounded_named_root_checks
+        PASS [   0.013s] ( 27/227) zed-knip logging::tests::install_progress_checking_cache_display
+        PASS [   0.011s] ( 28/227) zed-knip logging::tests::install_progress_failed_display_includes_reason
+        PASS [   0.008s] ( 29/227) zed-knip logging::tests::log_level_ordering_trace_is_lowest
+        PASS [   0.009s] ( 30/227) zed-knip logging::tests::log_level_ordering_same_level_is_equal
+        PASS [   0.012s] ( 31/227) zed-knip logging::tests::log_level_ordering_error_is_highest
+        PASS [   0.014s] ( 32/227) zed-knip logging::tests::install_progress_verifying_display
+        PASS [   0.010s] ( 33/227) zed-knip logging::tests::logger_install_progress_does_not_panic
+        PASS [   0.013s] ( 34/227) zed-knip logging::tests::logger_emits_message_above_configured_level
+        PASS [   0.011s] ( 35/227) zed-knip logging::tests::logger_error_level_suppresses_all_but_error
+        PASS [   0.013s] ( 36/227) zed-knip logging::tests::logger_emits_message_at_configured_level
+        PASS [   0.009s] ( 37/227) zed-knip logging::tests::logger_suppresses_message_below_configured_level
+        PASS [   0.009s] ( 38/227) zed-knip logging::tests::logger_set_level_updates_threshold
+        PASS [   0.009s] ( 39/227) zed-knip logging::tests::logger_trace_level_emits_all
+        PASS [   0.011s] ( 40/227) zed-knip managed_install::tests::cache_hit_returns_cached_path_without_installing
+        PASS [   0.013s] ( 41/227) zed-knip logging::tests::logger_install_progress_suppressed_when_level_above_info
+        PASS [   0.013s] ( 42/227) zed-knip managed_install::tests::backend_read_only_cache_error_surfaces_cache_path
+        PASS [   0.010s] ( 43/227) zed-knip managed_install::tests::cache_miss_installs_lazily_when_auto_install_enabled
+        PASS [   0.014s] ( 44/227) zed-knip managed_install::tests::cache_location_is_per_worktree_under_extension_cache_root
+        PASS [   0.014s] ( 45/227) zed-knip managed_install::tests::cache_miss_does_not_install_when_auto_install_disabled
+        PASS [   0.009s] ( 46/227) zed-knip managed_install::tests::offline_network_failure_surfaces_detail
+        PASS [   0.011s] ( 47/227) zed-knip managed_install::tests::stale_cache_reinstalls_and_records_stale_reason
+        PASS [   0.012s] ( 48/227) zed-knip managed_install::tests::corrupt_cache_errors_when_auto_install_disabled
+        PASS [   0.011s] ( 49/227) zed-knip package_manager::tests::package_manager_detects_bun_fixture
+        PASS [   0.013s] ( 50/227) zed-knip managed_install::tests::corrupt_cache_is_cleared_and_retried
+        PASS [   0.012s] ( 51/227) zed-knip package_manager::tests::package_manager_detects_bun_in_deeply_nested_path_with_spaces
+        PASS [   0.012s] ( 52/227) zed-knip package_manager::tests::package_manager_ambiguous_multiple_lockfiles_error
+        PASS [   0.012s] ( 53/227) zed-knip managed_install::tests::corrupt_download_is_reported_and_cache_directory_removed
+        PASS [   0.009s] ( 54/227) zed-knip package_manager::tests::package_manager_detects_npm_fixture
+        PASS [   0.010s] ( 55/227) zed-knip package_manager::tests::package_manager_detects_nested_package_root_without_parent_scan
+        PASS [   0.011s] ( 56/227) zed-knip package_manager::tests::package_manager_detects_no_manager_error
+        PASS [   0.011s] ( 57/227) zed-knip package_manager::tests::package_manager_detects_pnpm_at_monorepo_root
+        PASS [   0.015s] ( 58/227) zed-knip package_manager::tests::package_manager_detects_npm_in_path_with_spaces_fixture
+        PASS [   0.010s] ( 59/227) zed-knip reports::tests::cycles_empty_report_shows_clean_message
+        PASS [   0.011s] ( 60/227) zed-knip package_manager::tests::package_manager_relative_path_resolves_correctly
+        PASS [   0.015s] ( 61/227) zed-knip package_manager::tests::package_manager_detects_npm_in_temp_dir_with_spaces_in_path
+        PASS [   0.011s] ( 62/227) zed-knip package_manager::tests::package_manager_nested_package_root_does_not_inherit_monorepo_root_lockfile
+        PASS [   0.010s] ( 63/227) zed-knip reports::tests::cycles_report_numbers_multiple_cycles
+        PASS [   0.015s] ( 64/227) zed-knip package_manager::tests::package_manager_detects_package_manager_field
+        PASS [   0.014s] ( 65/227) zed-knip package_manager::tests::package_manager_detects_pnpm_fixture
+        PASS [   0.013s] ( 66/227) zed-knip package_manager::tests::package_manager_detects_through_symlinked_workspace_root
+        PASS [   0.013s] ( 67/227) zed-knip package_manager::tests::package_manager_path_is_always_pathbuf_not_string_concatenation
+        PASS [   0.015s] ( 68/227) zed-knip package_manager::tests::perf_package_manager_detection_ignores_nested_lockfiles
+        PASS [   0.015s] ( 69/227) zed-knip reports::tests::cycles_report_formats_chain_with_arrows
+        PASS [   0.016s] ( 70/227) zed-knip package_manager::tests::package_manager_detects_yarn_fixture
+        PASS [   0.009s] ( 71/227) zed-knip reports::tests::references_report_lists_locations
+        PASS [   0.010s] ( 72/227) zed-knip reports::tests::references_empty_report_shows_no_references_message
+        PASS [   0.010s] ( 73/227) zed-knip reports::tests::location_with_line_and_column_displays_all_parts
+        PASS [   0.009s] ( 74/227) zed-knip reports::tests::unused_exports_empty_report_shows_clean_message
+        PASS [   0.012s] ( 75/227) zed-knip reports::tests::location_file_only_displays_path
+        PASS [   0.011s] ( 76/227) zed-knip reports::tests::location_with_line_only_omits_column
+        PASS [   0.012s] ( 77/227) zed-knip reports::tests::unused_exports_report_contains_symbol_name_and_location
+        PASS [   0.011s] ( 78/227) zed-knip reports::tests::vscode_codelens_clean_workspace_shows_single_clean_message
+        PASS [   0.013s] ( 79/227) zed-knip reports::tests::unused_exports_report_count_reflects_entry_count
+        PASS [   0.010s] ( 80/227) zed-knip reports::tests::vscode_codelens_per_file_import_count_uses_location_file_field
+        PASS [   0.013s] ( 81/227) zed-knip reports::tests::unused_imports_report_contains_symbol_source_and_location
+        PASS [   0.009s] ( 82/227) zed-knip reports::tests::vscode_imports_tree_view_empty_state_shows_clean_message
+        PASS [   0.017s] ( 83/227) zed-knip reports::tests::unused_imports_empty_report_shows_clean_message
+        PASS [   0.015s] ( 84/227) zed-knip reports::tests::vscode_exports_tree_view_empty_state_shows_clean_message
+        PASS [   0.010s] ( 85/227) zed-knip reports::tests::vscode_exports_tree_view_maps_to_knip_exports_slash_command_markdown
+        PASS [   0.016s] ( 86/227) zed-knip reports::tests::vscode_codelens_import_counts_maps_to_knip_report_slash_command_markdown
+        PASS [   0.012s] ( 87/227) zed-knip reports::tests::workspace_summary_clean_workspace_shows_clean_message
+        PASS [   0.010s] ( 88/227) zed-knip reports::vscode_codelens_clean_workspace_shows_single_clean_message
+        PASS [   0.015s] ( 89/227) zed-knip reports::tests::vscode_imports_tree_view_maps_to_knip_imports_slash_command_markdown
+        PASS [   0.010s] ( 90/227) zed-knip reports::vscode_codelens_import_counts_maps_to_knip_report_slash_command_markdown
+        PASS [   0.010s] ( 91/227) zed-knip reports::vscode_exports_tree_view_empty_state_shows_clean_message
+        PASS [   0.016s] ( 92/227) zed-knip reports::tests::workspace_summary_is_clean_only_when_all_sub_reports_empty
+        PASS [   0.010s] ( 93/227) zed-knip reports::vscode_imports_tree_view_empty_state_shows_clean_message
+        PASS [   0.017s] ( 94/227) zed-knip reports::tests::workspace_summary_with_issues_includes_all_sections
+        PASS [   0.012s] ( 95/227) zed-knip reports::vscode_codelens_per_file_import_count_uses_location_file_field
+        PASS [   0.009s] ( 96/227) zed-knip resolver::tests::command_builder_preserves_path_with_spaces
+        PASS [   0.010s] ( 97/227) zed-knip resolver::tests::command_builder_encodes_path_with_spaces_as_display_string
+        PASS [   0.013s] ( 98/227) zed-knip resolver::tests::command_builder_sets_exact_command_args_env_and_working_dir
+        PASS [   0.010s] ( 99/227) zed-knip resolver::tests::resolve_configured_path_joins_relative_path_to_workspace_root
+        PASS [   0.012s] (100/227) zed-knip resolver::tests::resolve_configured_path_handles_relative_path_with_spaces
+        PASS [   0.015s] (101/227) zed-knip reports::vscode_imports_tree_view_maps_to_knip_imports_slash_command_markdown
+        PASS [   0.014s] (102/227) zed-knip resolver::tests::perf_command_builder_creates_one_language_server_process_per_worktree
+        PASS [   0.009s] (103/227) zed-knip resolver::tests::resolver_ambiguous_manager_returns_ambiguous_error
+        PASS [   0.010s] (104/227) zed-knip resolver::tests::resolver_cache_with_spaces_in_executable_path_is_used
+        PASS [   0.012s] (105/227) zed-knip resolver::tests::resolver_does_not_treat_directory_as_explicit_executable
+        PASS [   0.012s] (106/227) zed-knip resolver::tests::resolver_disabled_managed_install_returns_missing_knip
+        PASS [   0.016s] (107/227) zed-knip resolver::tests::resolver_absolute_explicit_path_with_spaces_is_accepted
+        PASS [   0.017s] (108/227) zed-knip resolver::tests::resolve_configured_path_returns_absolute_path_unchanged
+        PASS [   0.015s] (109/227) zed-knip resolver::tests::resolver_explicit_path_wins_over_workspace_local_and_cache
+        PASS [   0.015s] (110/227) zed-knip resolver::tests::resolver_follows_symlink_to_workspace_local_executable
+        PASS [   0.018s] (111/227) zed-knip resolver::tests::resolver_accepts_absolute_explicit_path
+        PASS [   0.014s] (112/227) zed-knip resolver::tests::resolver_keeps_explicit_package_manager_override_for_command_env
+        PASS [   0.013s] (113/227) zed-knip resolver::tests::resolver_nested_workspace_does_not_inherit_parent_package_manager
+        PASS [   0.013s] (114/227) zed-knip resolver::tests::resolver_non_executable_path_returns_non_executable
+        PASS [   0.014s] (115/227) zed-knip resolver::tests::resolver_invalid_explicit_path_returns_invalid_path
+        PASS [   0.019s] (116/227) zed-knip resolver::tests::resolver_offline_failed_install_surfaces_install_error
+        PASS [   0.019s] (117/227) zed-knip resolver::tests::resolver_rejects_managed_cache_non_executable
+        PASS [   0.021s] (118/227) zed-knip resolver::tests::resolver_missing_knip_uses_explicit_managed_install_path
+        PASS [   0.014s] (119/227) zed-knip resolver::tests::test_helper_can_create_file_for_non_spawned_executable_fixture
+        PASS [   0.018s] (120/227) zed-knip resolver::tests::resolver_uses_workspace_local_install_before_managed_cache
+        PASS [   0.021s] (121/227) zed-knip resolver::tests::resolver_uses_nested_workspace_root_in_monorepo
+        PASS [   0.022s] (122/227) zed-knip resolver::tests::resolver_relative_explicit_path_with_spaces_is_joined_to_workspace_root
+        PASS [   0.018s] (123/227) zed-knip settings::tests::settings_extra_args_empty_by_default
+        PASS [   0.023s] (124/227) zed-knip resolver::tests::resolver_uses_managed_cache_hit_when_workspace_local_missing
+        PASS [   0.016s] (125/227) zed-knip settings::tests::settings_merge_default_values
+        PASS [   0.013s] (126/227) zed-knip settings::tests::settings_invalid_log_level_parse
+        PASS [   0.011s] (127/227) zed-knip settings::tests::settings_merge_user_override_auto_install
+        PASS [   0.018s] (128/227) zed-knip settings::tests::settings_invalid_empty_config_path
+        PASS [   0.011s] (129/227) zed-knip tests::language_server_command_rejects_unsupported_language_server_id
+        PASS [   0.010s] (130/227) zed-knip tests::language_server_command_surfaces_resolver_errors_to_zed
+        PASS [   0.021s] (131/227) zed-knip settings::tests::settings_invalid_empty_server_path
+        PASS [   0.015s] (132/227) zed-knip tests::language_server_command_maps_mocked_resolver_error_to_zed_message
+        PASS [   0.011s] (133/227) zed-knip::failure_modes failure_ambiguous_package_manager_error_is_actionable
+        PASS [   0.014s] (134/227) zed-knip tests::language_server_command_uses_worktree_root_and_resolver_command
+        PASS [   0.030s] (135/227) zed-knip resolver::tests::resolver_workspace_root_with_spaces_resolves_workspace_local
+        PASS [   0.012s] (136/227) zed-knip tests::scaffold_smoke_test
+        PASS [   0.012s] (137/227) zed-knip::failure_modes failure_all_error_variants_produce_non_empty_messages
+        PASS [   0.009s] (138/227) zed-knip::failure_modes failure_invalid_config_error_contains_config_path
+        PASS [   0.011s] (139/227) zed-knip::failure_modes failure_corrupt_cache_error_contains_path_and_remediation
+        PASS [   0.009s] (140/227) zed-knip::failure_modes failure_invalid_config_fixture_path_is_named_in_error
+        PASS [   0.013s] (141/227) zed-knip::failure_modes failure_ambiguous_package_manager_resolved_by_settings_override
+        PASS [   0.016s] (142/227) zed-knip::failure_modes failure_ambiguous_package_manager_lists_conflicting_lockfiles
+        PASS [   0.017s] (143/227) zed-knip::failure_modes failure_corrupt_cache_detail_appears_in_message
+        PASS [   0.011s] (144/227) zed-knip::failure_modes failure_language_server_crash_without_exit_code_is_actionable
+        PASS [   0.012s] (145/227) zed-knip::failure_modes failure_language_server_crash_with_exit_code_names_code
+        PASS [   0.011s] (146/227) zed-knip::failure_modes failure_offline_generic_detail_is_preserved
+        PASS [   0.011s] (147/227) zed-knip::failure_modes failure_read_only_cache_error_contains_path_and_remediation
+        PASS [   0.017s] (148/227) zed-knip::failure_modes failure_language_server_crash_exit_code_one_is_distinct_from_none
+        PASS [   0.012s] (149/227) zed-knip::failure_modes failure_missing_knip_error_message_contains_workspace_root
+        PASS [   0.012s] (150/227) zed-knip::failure_modes failure_read_only_cache_path_with_spaces_preserved_in_message
+        PASS [   0.014s] (151/227) zed-knip::failure_modes failure_offline_network_error_surfaces_detail
+        PASS [   0.011s] (152/227) zed-knip::fixtures fixture_path_join_uses_pathbuf_not_string_concat
+        PASS [   0.012s] (153/227) zed-knip::fixtures fixture_inventory
+        PASS [   0.012s] (154/227) zed-knip::fixtures fixture_path_with_spaces_contains_expected_files
+        PASS [   0.017s] (155/227) zed-knip::failure_modes failure_missing_knip_binary_returns_actionable_error
+        PASS [   0.010s] (156/227) zed-knip::lsp_parity lsp_parity_code_action_add_jsdoc_is_not_preferred
+        PASS [   0.009s] (157/227) zed-knip::lsp_parity lsp_parity_code_action_delete_file_is_unsupported
+        PASS [   0.011s] (158/227) zed-knip::lsp_parity lsp_parity_code_action_add_jsdoc_tag_shape_is_valid
+        PASS [   0.014s] (159/227) zed-knip::fixtures fixture_path_with_spaces_is_accessible_as_pathbuf
+        PASS [   0.011s] (160/227) zed-knip::lsp_parity lsp_parity_code_action_install_dependency_is_zed_equivalent
+        PASS [   0.011s] (161/227) zed-knip::lsp_parity lsp_parity_code_action_kinds_use_knip_prefix
+        PASS [   0.011s] (162/227) zed-knip::lsp_parity lsp_parity_code_action_method_name_is_standard_lsp
+        PASS [   0.009s] (163/227) zed-knip::lsp_parity lsp_parity_code_action_remove_dependency_shape_is_valid
+        PASS [   0.011s] (164/227) zed-knip::lsp_parity lsp_parity_code_action_method_returns_list_not_single_item
+        PASS [   0.011s] (165/227) zed-knip::lsp_parity lsp_parity_code_action_remove_dependency_is_not_preferred
+        PASS [   0.011s] (166/227) zed-knip::lsp_parity lsp_parity_code_action_remove_export_is_preferred
+        PASS [   0.011s] (167/227) zed-knip::lsp_parity lsp_parity_code_action_remove_export_shape_is_valid
+        PASS [   0.010s] (168/227) zed-knip::lsp_parity lsp_parity_codelens_clean_workspace_summary_shows_single_message
+        PASS [   0.009s] (169/227) zed-knip::lsp_parity lsp_parity_codelens_import_counts_is_zed_equivalent
+        PASS [   0.014s] (170/227) zed-knip::lsp_parity lsp_parity_code_action_title_contains_symbol_name
+        PASS [   0.010s] (171/227) zed-knip::lsp_parity lsp_parity_codelens_no_direct_zed_api
+        PASS [   0.009s] (172/227) zed-knip::lsp_parity lsp_parity_custom_method_show_references_name_is_correct
+        PASS [   0.009s] (173/227) zed-knip::lsp_parity lsp_parity_diagnostic_multiple_issues_in_one_file_are_batched
+        PASS [   0.014s] (174/227) zed-knip::lsp_parity lsp_parity_codelens_workspace_summary_includes_all_sections_when_dirty
+        PASS [   0.013s] (175/227) zed-knip::lsp_parity lsp_parity_codelens_workspace_summary_report_is_knip_report_surface
+        PASS [   0.013s] (176/227) zed-knip::lsp_parity lsp_parity_custom_method_open_file_name_is_correct
+        PASS [   0.011s] (177/227) zed-knip::lsp_parity lsp_parity_diagnostic_codes_are_kebab_case_strings
+        PASS [   0.013s] (178/227) zed-knip::lsp_parity lsp_parity_custom_methods_are_knip_namespaced
+        PASS [   0.012s] (179/227) zed-knip::lsp_parity lsp_parity_diagnostic_clear_is_empty_diagnostics_array
+        PASS [   0.011s] (180/227) zed-knip::lsp_parity lsp_parity_diagnostic_range_is_zero_based_lsp_positions
+        PASS [   0.011s] (181/227) zed-knip::lsp_parity lsp_parity_diagnostic_source_field_is_always_knip
+        PASS [   0.012s] (182/227) zed-knip::lsp_parity lsp_parity_diagnostic_severity_is_warning_for_all_knip_issues
+        PASS [   0.010s] (183/227) zed-knip::lsp_parity lsp_parity_diagnostics_method_name_is_standard_lsp
+        PASS [   0.009s] (184/227) zed-knip::lsp_parity lsp_parity_diagnostics_unused_dependency_shape_is_valid
+        PASS [   0.008s] (185/227) zed-knip::lsp_parity lsp_parity_diagnostics_unused_file_shape_is_valid
+        PASS [   0.011s] (186/227) zed-knip::lsp_parity lsp_parity_diagnostics_circular_dependency_shape_is_valid
+        PASS [   0.008s] (187/227) zed-knip::lsp_parity lsp_parity_diagnostics_unused_export_shape_is_valid
+        PASS [   0.016s] (188/227) zed-knip::lsp_parity lsp_parity_diagnostic_publish_params_uri_is_file_scheme
+        PASS [   0.008s] (189/227) zed-knip::lsp_parity lsp_parity_hover_export_usages_shape_is_valid
+        PASS [   0.011s] (190/227) zed-knip::lsp_parity lsp_parity_hover_dependency_targets_package_json
+        PASS [   0.011s] (191/227) zed-knip::lsp_parity lsp_parity_hover_dependency_usages_shape_is_valid
+        PASS [   0.013s] (192/227) zed-knip::lsp_parity lsp_parity_hover_contents_is_markdown_string
+        PASS [   0.009s] (193/227) zed-knip::lsp_parity lsp_parity_hover_show_hover_command_is_zed_equivalent
+        PASS [   0.015s] (194/227) zed-knip::lsp_parity lsp_parity_hover_export_lists_consuming_files
+        PASS [   0.012s] (195/227) zed-knip::lsp_parity lsp_parity_hover_range_spans_the_hovered_symbol
+        PASS [   0.013s] (196/227) zed-knip::lsp_parity lsp_parity_lifecycle_file_watching_is_implemented
+        PASS [   0.016s] (197/227) zed-knip::lsp_parity lsp_parity_hover_method_name_is_standard_lsp
+        PASS [   0.012s] (198/227) zed-knip::lsp_parity lsp_parity_matrix_has_no_unknown_statuses
+        PASS [   0.013s] (199/227) zed-knip::lsp_parity lsp_parity_matrix_all_features_have_a_status
+        PASS [   0.010s] (200/227) zed-knip::lsp_parity lsp_parity_matrix_implemented_count_matches_expected
+        PASS [   0.015s] (201/227) zed-knip::lsp_parity lsp_parity_hover_timeout_is_documented_constraint
+        PASS [   0.015s] (202/227) zed-knip::lsp_parity lsp_parity_hover_unused_symbol_shows_zero_usages
+        PASS [   0.016s] (203/227) zed-knip::lsp_parity lsp_parity_lifecycle_ls_startup_is_implemented
+        PASS [   0.011s] (204/227) zed-knip::lsp_parity lsp_parity_matrix_mcp_excluded_count_matches_expected
+        PASS [   0.013s] (205/227) zed-knip::lsp_parity lsp_parity_matrix_unsupported_count_matches_expected
+        PASS [   0.014s] (206/227) zed-knip::lsp_parity lsp_parity_matrix_zed_equivalent_count_matches_expected
+        PASS [   0.011s] (207/227) zed-knip::lsp_parity lsp_parity_settings_config_file_path_is_implemented
+        PASS [   0.014s] (208/227) zed-knip::lsp_parity lsp_parity_mcp_features_are_excluded
+        PASS [   0.013s] (209/227) zed-knip::lsp_parity lsp_parity_settings_defer_session_is_implemented
+        PASS [   0.009s] (210/227) zed-knip::lsp_parity lsp_parity_settings_require_config_is_implemented
+        PASS [   0.010s] (211/227) zed-knip::lsp_parity lsp_parity_tree_view_exports_report_count_in_heading
+        PASS [   0.011s] (212/227) zed-knip::lsp_parity lsp_parity_tree_view_exports_is_zed_equivalent
+        PASS [   0.012s] (213/227) zed-knip::lsp_parity lsp_parity_tree_view_expand_all_command_is_unsupported
+        PASS [   0.011s] (214/227) zed-knip::lsp_parity lsp_parity_tree_view_exports_report_empty_state_is_clean
+        PASS [   0.011s] (215/227) zed-knip::lsp_parity lsp_parity_tree_view_exports_report_markdown_has_table_and_heading
+        PASS [   0.011s] (216/227) zed-knip::lsp_parity lsp_parity_tree_view_imports_is_zed_equivalent
+        PASS [   0.015s] (217/227) zed-knip::lsp_parity lsp_parity_settings_node_runtime_path_is_implemented
+        PASS [   0.015s] (218/227) zed-knip::lsp_parity lsp_parity_tree_view_cycles_report_formats_arrow_chain
+        PASS [   0.009s] (219/227) zed-knip::lsp_parity lsp_parity_tree_view_imports_report_empty_state_is_clean
+        PASS [   0.009s] (220/227) zed-knip::lsp_parity lsp_parity_tree_view_imports_report_markdown_has_table_and_heading
+        PASS [   0.010s] (221/227) zed-knip::lsp_parity lsp_parity_tree_view_references_report_lists_locations
+        PASS [   0.008s] (222/227) zed-knip::perf_guardrails perf_command_builder_documents_single_language_server_process_per_worktree
+        PASS [   0.010s] (223/227) zed-knip::perf_guardrails perf_cache_invalidation_tracks_only_known_named_inputs
+        PASS [   0.007s] (224/227) zed-knip::perf_guardrails perf_config_detection_has_no_recursive_file_scan_path
+        PASS [   0.006s] (225/227) zed-knip::perf_guardrails perf_package_manager_detection_uses_bounded_named_file_checks
+        PASS [   0.008s] (226/227) zed-knip::perf_guardrails perf_no_background_polling_or_watcher_code_paths_exist
+        PASS [   0.009s] (227/227) zed-knip::perf_guardrails perf_resolver_uses_named_workspace_executable_candidates
+────────────
+     Summary [   0.206s] 227 tests run: 227 passed, 0 skipped

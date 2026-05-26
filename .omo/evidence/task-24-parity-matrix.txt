@@ -1,0 +1,24 @@
+=== Parity Matrix Coverage Check ===
+
+Required categories:
+  diagnostics: 8 matches
+  code.action: 9 matches
+  settings: 5 matches
+  commands: 2 matches
+  hover: 9 matches
+  CodeLens: 4 matches
+  tree.view: 6 matches
+  lifecycle: 2 matches
+  package.manager: 0 matches
+  logging: 0 matches
+  MCP: 5 matches
+
+=== Parity Matrix Summary ===
+| Feature | VSCode Reference | Zed Equivalent | Status | Harness-Confirmed | Limitations/Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Diagnostics** | | | | | |
+| Unused files | `diagnostics.js` | Diagnostics | `implemented` | ✓ | Published via LSP. |
+| Unused dependencies | `diagnostics.js` | Diagnostics | `implemented` | ✓ | Published via LSP. |
+
+Total rows:
+63
