@@ -22,6 +22,7 @@ fn perf_package_manager_detection_uses_bounded_named_file_checks() {
 		"package-lock.json",
 		"pnpm-lock.yaml",
 		"yarn.lock",
+		"bun.lock",
 		"bun.lockb",
 	] {
 		assert!(

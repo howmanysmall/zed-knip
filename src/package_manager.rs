@@ -50,7 +50,9 @@ pub fn detect(workspace_root: &Path) -> Result<PackageManager, PackageManagerErr
 	if workspace_root.join("yarn.lock").is_file() {
 		found.push("yarn.lock".to_string());
 	}
-	if workspace_root.join("bun.lockb").is_file() {
+	if workspace_root.join("bun.lock").is_file() {
+		found.push("bun.lock".to_string());
+	} else if workspace_root.join("bun.lockb").is_file() {
 		found.push("bun.lockb".to_string());
 	}
 
@@ -99,6 +101,7 @@ fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
 		"package-lock.json" => Some(PackageManager::Npm),
 		"pnpm-lock.yaml" => Some(PackageManager::Pnpm),
 		"yarn.lock" => Some(PackageManager::Yarn),
+		"bun.lock" => Some(PackageManager::Bun),
 		"bun.lockb" => Some(PackageManager::Bun),
 		_ => None,
 	}
@@ -106,7 +109,7 @@ fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
 
 #[cfg(test)]
 mod tests {
-	use super::{detect, PackageManager, PackageManagerError};
+	use super::{PackageManager, PackageManagerError, detect};
 	use std::fs;
 	use std::path::{Path, PathBuf};
 	use std::time::{SystemTime, UNIX_EPOCH};
@@ -264,7 +267,7 @@ mod tests {
 	#[test]
 	fn package_manager_detects_bun_in_deeply_nested_path_with_spaces() {
 		let workspace = TempWorkspace::new("outer dir/inner dir");
-		workspace.write("bun.lockb", "");
+		workspace.write("bun.lock", "");
 
 		let manager = detect(&workspace.root).unwrap();
 

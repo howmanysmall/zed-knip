@@ -27,15 +27,15 @@ Zed Knip integrates the Knip language server into Zed, providing real-time feedb
 1. Build the extension WASM artifact:
 
    ```sh
-   mise x -- cargo build --release --target wasm32-wasip1
+   mise x -- cargo build --release --target wasm32-wasip2
    ```
 
 2. Copy the extension directory to your local Zed extensions folder:
 
-   - **macOS**: `~/Library/Application Support/Zed/extensions/zed-knip/`
-   - **Linux**: `~/.local/share/zed/extensions/zed-knip/`
+   - **macOS**: `~/Library/Application Support/Zed/extensions/installed/zed-knip/`
+   - **Linux**: `~/.local/share/zed/extensions/installed/zed-knip/`
 
-   The directory should contain `extension.toml` and the compiled `extension.wasm` (rename `target/wasm32-wasip1/release/zed_knip.wasm` to `extension.wasm`).
+   The directory should contain `extension.toml` and the compiled `extension.wasm` (rename `target/wasm32-wasip2/release/zed_knip.wasm` to `extension.wasm`).
 
 3. Restart Zed to load the extension.
 
@@ -79,7 +79,7 @@ mise x -- cargo nextest run --no-tests=pass
 mise x -- cargo nextest run --all-targets --all-features
 
 # Build for WASM
-mise x -- cargo build --release --target wasm32-wasip1
+mise x -- cargo build --release --target wasm32-wasip2
 ```
 
 ### Formatting and Linting

@@ -35,7 +35,7 @@ br = "cargo build --release"
 ti = "cargo nextest run"
 
 ta = "cargo nextest run --all-targets --all-features"
-bw = "cargo build --release --target wasm32-wasip1"
+bw = "cargo build --release --target wasm32-wasip2"
 fa = "npm run format"
 la = "aube run lint"
 tc = "aube run type-check"
@@ -54,27 +54,55 @@ description = "Run the full test suite (unit + integration + all targets + all f
 run = "cargo nextest run --all-targets --all-features"
 
 [tasks.build-wasm]
-description = "Build the release WASM artifact for Zed (wasm32-wasip1 target)"
-run = "cargo build --release --target wasm32-wasip1"
+description = "Build the release WASM artifact for Zed (wasm32-wasip2 target)"
+run = "cargo build --release --target wasm32-wasip2"
 
 [tasks.install-local]
-description = "Build WASM and install into your local Zed extensions directory for manual testing"
+description = "Build the WASM artifact and install it as a dev extension under Zed's installed/ directory"
 run = '''
-cargo build --release --target wasm32-wasip1
+set -euo pipefail
+
+echo "🔨 Building release WASM for Zed..."
+cargo build --release --target wasm32-wasip2
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  EXT_DIR="$HOME/Library/Application Support/Zed/extensions/zed-knip"
+  EXT_BASE="$HOME/Library/Application Support/Zed/extensions"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-  EXT_DIR="$HOME/.local/share/zed/extensions/zed-knip"
+  EXT_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/zed/extensions"
 else
-  echo "Unsupported OS. Set EXT_DIR manually."
+  echo "❌ Unsupported OS for automatic path detection."
+  echo "   Set EXT_BASE manually, e.g.:"
+  echo "   EXT_BASE=... mise run install-local"
   exit 1
 fi
 
-mkdir -p "$EXT_DIR"
-cp target/wasm32-wasip1/release/zed_knip.wasm "$EXT_DIR/extension.wasm"
-cp extension.toml "$EXT_DIR/"
-echo "Installed to $EXT_DIR — restart Zed to load."
+TARGET_DIR="$EXT_BASE/installed/zed-knip"
+
+if [[ -L "$TARGET_DIR" ]]; then
+  rm "$TARGET_DIR"
+elif [[ -d "$TARGET_DIR" ]]; then
+  rm -rf "$TARGET_DIR"
+fi
+
+mkdir -p "$TARGET_DIR"
+
+echo "📦 Installing dev extension to: $TARGET_DIR"
+
+cp -f extension.toml "$TARGET_DIR/"
+cp -f "target/wasm32-wasip2/release/zed_knip.wasm" "$TARGET_DIR/extension.wasm"
+
+echo ""
+echo "✅ Dev extension installed."
+echo ""
+echo "Next steps:"
+echo "  1. In Zed, open the command palette (Cmd+Shift+P / Ctrl+Shift+P)"
+echo "  2. Run:  zed: reload extensions"
+echo "     (or fully quit and restart Zed)"
+echo ""
+echo "Requirements:"
+echo "  • Rust must be installed via rustup (not Homebrew)."
+echo "  • The folder under installed/ must be named exactly 'zed-knip'."
+echo "  • The WASM file must be named exactly 'extension.wasm'."
 '''
 
 [tasks.pre-commit]
@@ -98,5 +126,5 @@ description = "Full local verification: all tests + clippy + WASM build"
 run = [
 	"cargo nextest run --all-targets --all-features",
 	"cargo clippy --all-targets -- -D warnings",
-	"cargo build --release --target wasm32-wasip1"
+	"cargo build --release --target wasm32-wasip2"
 ]
