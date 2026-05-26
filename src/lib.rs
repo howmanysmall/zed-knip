@@ -12,7 +12,7 @@ use crate::{
 	cache::WorktreeCache,
 	config_detection::detect_config,
 	errors::KnipError,
-	resolver::{build_language_server_command, resolve_knip, ManagedInstallDisabled},
+	resolver::{build_language_server_command, resolve_knip, ZedNpmManagedInstall},
 	settings::{KnipSettings, LogLevel},
 };
 use std::path::PathBuf;
@@ -88,7 +88,7 @@ impl CommandResolver for ProductionResolver {
 		workspace_root: &std::path::Path,
 	) -> Result<zed::Command, KnipError> {
 		let cache = WorktreeCache::new(workspace_root.to_path_buf());
-		let resolved = resolve_knip(settings, &cache, &ManagedInstallDisabled)?;
+		let resolved = resolve_knip(settings, &cache, &ZedNpmManagedInstall)?;
 		let command = build_language_server_command(&resolved, settings, workspace_root);
 
 		Ok(command.command)
@@ -358,9 +358,13 @@ mod tests {
 	fn language_server_command_surfaces_resolver_errors_to_zed() {
 		let worktree = TestWorktree::new("resolver-error");
 		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		let resolver = MockResolver {
+			result: Err(KnipError::FailedManagedInstall {
+				reason: "host API unavailable in native tests".to_string(),
+			}),
+		};
 
-		let error =
-			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+		let error = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap_err();
 
 		assert!(error.contains("Managed Knip install failed"));
 	}

@@ -5,14 +5,14 @@ use crate::{
 	settings::KnipSettings,
 };
 use std::{
-	fmt,
+	env, fmt,
 	path::{Path, PathBuf},
 };
 use zed_extension_api as zed;
 
 const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
-const LEGACY_LANGUAGE_SERVER_BIN: &str = "language-server";
-const KNIP_BIN: &str = "knip";
+const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
+const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedKnip {
@@ -39,6 +39,47 @@ impl ManagedInstall for ManagedInstallDisabled {
 		Err(KnipError::FailedManagedInstall {
 			reason: "managed install is not configured".to_string(),
 		})
+	}
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ZedNpmManagedInstall;
+
+impl ManagedInstall for ZedNpmManagedInstall {
+	fn install(&self, _workspace_root: &Path, _package_manager: PackageManager) -> Result<PathBuf, KnipError> {
+		let executable_path = env::current_dir()
+			.map_err(|error| KnipError::FailedManagedInstall {
+				reason: format!("failed to resolve extension working directory: {error}"),
+			})?
+			.join(MANAGED_LANGUAGE_SERVER_BIN);
+
+		let installed_version = zed::npm_package_installed_version(LANGUAGE_SERVER_PACKAGE).map_err(|error| {
+			KnipError::FailedManagedInstall {
+				reason: format!("failed to inspect installed {LANGUAGE_SERVER_PACKAGE}: {error}"),
+			}
+		})?;
+
+		let latest_version = match zed::npm_package_latest_version(LANGUAGE_SERVER_PACKAGE) {
+			Ok(version) => version,
+			Err(error) if installed_version.is_some() && executable_path.is_file() => {
+				return Ok(executable_path);
+			}
+			Err(error) => {
+				return Err(KnipError::NetworkUnavailable {
+					detail: format!("failed to resolve latest {LANGUAGE_SERVER_PACKAGE}: {error}"),
+				});
+			}
+		};
+
+		if installed_version.as_ref() != Some(&latest_version) {
+			zed::npm_install_package(LANGUAGE_SERVER_PACKAGE, &latest_version).map_err(|error| {
+				KnipError::FailedManagedInstall {
+					reason: format!("failed to install {LANGUAGE_SERVER_PACKAGE}@{latest_version}: {error}"),
+				}
+			})?;
+		}
+
+		Ok(executable_path)
 	}
 }
 
@@ -166,13 +207,9 @@ fn package_manager_error_to_knip_error(error: PackageManagerError) -> KnipError 
 
 fn workspace_local_language_server(workspace_root: &Path) -> Option<PathBuf> {
 	let bin_dir = workspace_root.join("node_modules").join(".bin");
-	[
-		bin_dir.join(LANGUAGE_SERVER_BIN),
-		bin_dir.join(LEGACY_LANGUAGE_SERVER_BIN),
-		bin_dir.join(KNIP_BIN),
-	]
-	.into_iter()
-	.find(|candidate| candidate.is_file())
+	[bin_dir.join(LANGUAGE_SERVER_BIN)]
+		.into_iter()
+		.find(|candidate| candidate.is_file())
 }
 
 fn managed_cache_path(cache: &WorktreeCache) -> Option<PathBuf> {
@@ -374,6 +411,22 @@ mod tests {
 		assert_eq!(resolved.executable_path, local);
 		assert_eq!(resolved.package_manager, PackageManager::Pnpm);
 		assert_eq!(resolved.install_source, InstallSource::WorkspaceLocal);
+	}
+
+	#[test]
+	fn resolver_does_not_start_knip_cli_as_language_server() {
+		let workspace = TestWorkspace::new("knip-cli-not-lsp");
+		workspace.package_json("bun");
+		workspace.executable("node_modules/.bin/knip");
+		let managed = workspace.executable("managed/knip-language-server");
+		let installer = MockManagedInstall {
+			result: Ok(managed.clone()),
+		};
+
+		let resolved = resolve_knip(&KnipSettings::default(), &cache(&workspace.root), &installer).unwrap();
+
+		assert_eq!(resolved.executable_path, managed);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
 	}
 
 	#[test]

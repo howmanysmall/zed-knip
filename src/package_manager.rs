@@ -52,8 +52,6 @@ pub fn detect(workspace_root: &Path) -> Result<PackageManager, PackageManagerErr
 	}
 	if workspace_root.join("bun.lock").is_file() {
 		found.push("bun.lock".to_string());
-	} else if workspace_root.join("bun.lockb").is_file() {
-		found.push("bun.lockb".to_string());
 	}
 
 	match found.as_slice() {
@@ -102,14 +100,13 @@ fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
 		"pnpm-lock.yaml" => Some(PackageManager::Pnpm),
 		"yarn.lock" => Some(PackageManager::Yarn),
 		"bun.lock" => Some(PackageManager::Bun),
-		"bun.lockb" => Some(PackageManager::Bun),
 		_ => None,
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use super::{PackageManager, PackageManagerError, detect};
+	use super::{detect, PackageManager, PackageManagerError};
 	use std::fs;
 	use std::path::{Path, PathBuf};
 	use std::time::{SystemTime, UNIX_EPOCH};

@@ -23,7 +23,6 @@ fn perf_package_manager_detection_uses_bounded_named_file_checks() {
 		"pnpm-lock.yaml",
 		"yarn.lock",
 		"bun.lock",
-		"bun.lockb",
 	] {
 		assert!(
 			PACKAGE_MANAGER_SOURCE.contains(file_name),
@@ -58,12 +57,19 @@ fn perf_cache_invalidation_tracks_only_known_named_inputs() {
 
 #[test]
 fn perf_resolver_uses_named_workspace_executable_candidates() {
-	for executable in ["knip-language-server", "language-server", "knip"] {
-		assert!(
-			RESOLVER_SOURCE.contains(executable),
-			"resolver must keep checking the named executable candidate {executable}"
-		);
-	}
+	assert!(
+		RESOLVER_SOURCE.contains("knip-language-server"),
+		"resolver must keep checking the named executable candidate knip-language-server"
+	);
+
+	assert!(
+		!RESOLVER_SOURCE.contains("\"language-server\""),
+		"resolver must not fall back to legacy language-server executable names"
+	);
+	assert!(
+		!RESOLVER_SOURCE.contains("KNIP_BIN"),
+		"resolver must not start the Knip CLI as an LSP server"
+	);
 
 	assert_no_recursive_scan_apis("src/resolver.rs", RESOLVER_SOURCE);
 }
