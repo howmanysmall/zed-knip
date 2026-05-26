@@ -442,12 +442,16 @@ fn lsp_parity_lifecycle_ls_startup_is_implemented() {
 
 #[test]
 fn lsp_parity_lifecycle_file_watching_is_implemented() {
-	// workspace/didChangeWatchedFiles is standard LSP; Zed supports it.
+	// Knip's LS does not dynamically register file notifications. The managed
+	// server must advertise save sync and route didSave through Knip's refresh.
 	let parity_status = "implemented";
-	let lsp_method = "workspace/didChangeWatchedFiles";
+	let lsp_method = "textDocument/didSave";
+	let resolver_source = include_str!("../src/resolver.rs");
 
 	assert_eq!(parity_status, "implemented");
-	assert!(lsp_method.starts_with("workspace/"));
+	assert!(lsp_method.starts_with("textDocument/"));
+	assert!(resolver_source.contains("textDocumentSync"));
+	assert!(resolver_source.contains("onDidSave"));
 }
 
 // ---------------------------------------------------------------------------

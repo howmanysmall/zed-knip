@@ -5,7 +5,7 @@ use crate::{
 	settings::KnipSettings,
 };
 use std::{
-	env, fmt,
+	env, fmt, fs,
 	path::{Path, PathBuf},
 };
 use zed_extension_api as zed;
@@ -13,6 +13,7 @@ use zed_extension_api as zed;
 const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
 const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
 const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
+const DID_SAVE_REFRESH_PATCH_MARKER: &str = "zed-knip: refresh Knip diagnostics on textDocument/didSave";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedKnip {
@@ -62,6 +63,7 @@ impl ManagedInstall for ZedNpmManagedInstall {
 		let latest_version = match zed::npm_package_latest_version(LANGUAGE_SERVER_PACKAGE) {
 			Ok(version) => version,
 			Err(error) if installed_version.is_some() && executable_path.is_file() => {
+				patch_managed_language_server(&executable_path)?;
 				return Ok(executable_path);
 			}
 			Err(error) => {
@@ -79,6 +81,7 @@ impl ManagedInstall for ZedNpmManagedInstall {
 			})?;
 		}
 
+		patch_managed_language_server(&executable_path)?;
 		Ok(executable_path)
 	}
 }
@@ -218,6 +221,74 @@ fn managed_cache_path(cache: &WorktreeCache) -> Option<PathBuf> {
 	} else {
 		None
 	}
+}
+
+fn patch_managed_language_server(executable_path: &Path) -> Result<(), KnipError> {
+	let server_path = managed_language_server_server_path(executable_path)?;
+	let source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
+		reason: format!("failed to read managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+	})?;
+	let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+	})?
+	else {
+		return Ok(());
+	};
+
+	fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
+		reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+	})
+}
+
+fn managed_language_server_server_path(executable_path: &Path) -> Result<PathBuf, KnipError> {
+	let cli_path = match fs::read_link(executable_path) {
+		Ok(target) if target.is_absolute() => target,
+		Ok(target) => executable_path.parent().unwrap_or_else(|| Path::new("")).join(target),
+		Err(error) => {
+			return Err(KnipError::FailedManagedInstall {
+				reason: format!("failed to resolve managed {LANGUAGE_SERVER_BIN} symlink: {error}"),
+			});
+		}
+	};
+
+	Ok(cli_path.parent().unwrap_or_else(|| Path::new("")).join("server.js"))
+}
+
+fn apply_did_save_refresh_patch(source: &str) -> Result<Option<String>, String> {
+	if source.contains(DID_SAVE_REFRESH_PATCH_MARKER) {
+		return Ok(None);
+	}
+
+	let patched = replace_once(
+		source,
+		"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';",
+		"import { FileChangeType, ProposedFeatures, TextDocumentSyncKind, TextDocuments } from 'vscode-languageserver';",
+		"vscode-languageserver import",
+	)?;
+	let patched = replace_once(
+		&patched,
+		"const capabilities = {\n        codeActionProvider:",
+		"const capabilities = {\n        textDocumentSync: {\n          openClose: true,\n          change: TextDocumentSyncKind.None,\n          save: { includeText: false },\n        },\n        codeActionProvider:",
+		"initialize capabilities",
+	)?;
+	let patched = replace_once(
+		&patched,
+		"this.documents.listen(this.connection);\n    this.connection.listen();",
+		&format!(
+			"this.documents.listen(this.connection);\n    // {DID_SAVE_REFRESH_PATCH_MARKER}\n    this.documents.onDidSave(event => {{\n      void this.handleFileChanges({{ changes: [{{ uri: event.document.uri, type: FileChangeType.Changed }}] }});\n    }});\n    this.connection.listen();"
+		),
+		"document save listener",
+	)?;
+
+	Ok(Some(patched))
+}
+
+fn replace_once(source: &str, needle: &str, replacement: &str, label: &str) -> Result<String, String> {
+	if !source.contains(needle) {
+		return Err(format!("missing {label} patch anchor"));
+	}
+
+	Ok(source.replacen(needle, replacement, 1))
 }
 
 fn resolve_configured_path(workspace_root: &Path, configured_path: &str) -> PathBuf {
@@ -477,6 +548,72 @@ mod tests {
 
 		assert_eq!(resolved.executable_path, managed);
 		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
+	}
+
+	#[test]
+	fn managed_language_server_patch_adds_save_based_refresh_once() {
+		let source = r#"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';
+
+class LanguageServer {
+  constructor() {
+    this.documents.listen(this.connection);
+    this.connection.listen();
+  }
+
+  onInitialize() {
+    const capabilities = {
+        codeActionProvider: {
+          codeActionKinds: [CodeActionKind.QuickFix],
+        },
+    };
+    return { capabilities };
+  }
+}
+"#;
+
+		let patched = apply_did_save_refresh_patch(source)
+			.expect("patch must apply")
+			.expect("first patch must update source");
+
+		assert!(patched.contains("TextDocumentSyncKind"));
+		assert!(patched.contains("textDocumentSync"));
+		assert!(patched.contains("this.documents.onDidSave"));
+		assert!(patched.contains("FileChangeType.Changed"));
+		assert!(patched.contains(DID_SAVE_REFRESH_PATCH_MARKER));
+		assert!(
+			apply_did_save_refresh_patch(&patched)
+				.expect("patched source must be accepted")
+				.is_none(),
+			"patch must be idempotent"
+		);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn managed_language_server_patch_resolves_bin_symlink_to_server_file() {
+		use std::os::unix::fs::symlink;
+
+		let workspace = TestWorkspace::new("managed-patch");
+		let cli = workspace.write(
+			"node_modules/@knip/language-server/src/cli.js",
+			"#!/usr/bin/env node\nimport './index.js';\n",
+		);
+		workspace.write(
+			"node_modules/@knip/language-server/src/server.js",
+			"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';\n\nclass LanguageServer {\n  constructor() {\n    this.documents.listen(this.connection);\n    this.connection.listen();\n  }\n\n  onInitialize() {\n    const capabilities = {\n        codeActionProvider: {},\n    };\n    return { capabilities };\n  }\n}\n",
+		);
+		let bin_dir = workspace.root.join("node_modules").join(".bin");
+		fs::create_dir_all(&bin_dir).unwrap_or_else(|error| panic!("failed to create {}: {error}", bin_dir.display()));
+		let executable = bin_dir.join("knip-language-server");
+		symlink("../@knip/language-server/src/cli.js", &executable)
+			.unwrap_or_else(|error| panic!("failed to link {} to {}: {error}", executable.display(), cli.display()));
+
+		patch_managed_language_server(&executable).unwrap();
+
+		let server = fs::read_to_string(workspace.root.join("node_modules/@knip/language-server/src/server.js"))
+			.expect("patched server must be readable");
+		assert!(server.contains(DID_SAVE_REFRESH_PATCH_MARKER));
+		assert!(server.contains("this.documents.onDidSave"));
 	}
 
 	#[test]
