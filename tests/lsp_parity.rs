@@ -8,6 +8,10 @@
 // Run with:
 //   mise x -- cargo nextest run -E 'test(lsp_parity)'
 
+use zed_knip::reports::{
+	Cycle, CyclesReport, FormatMarkdown, Location, Reference, ReferencesReport, UnusedExport, UnusedExportsReport,
+	UnusedImport, UnusedImportsReport, WorkspaceSummaryReport,
+};
 // ---------------------------------------------------------------------------
 // Shared LSP payload types (minimal, no external deps)
 // ---------------------------------------------------------------------------
@@ -947,4 +951,223 @@ fn lsp_parity_matrix_mcp_excluded_count_matches_expected() {
 	let mcp = matrix.iter().filter(|(_, s)| *s == ParityStatus::McpExcluded).count();
 
 	assert_eq!(mcp, 3, "expected 3 MCP-excluded features");
+}
+
+// ---------------------------------------------------------------------------
+// Tree view → markdown report output format tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lsp_parity_tree_view_exports_report_markdown_has_table_and_heading() {
+	let report = UnusedExportsReport::new(vec![UnusedExport {
+		name: "MyWidget".to_owned(),
+		location: Location::at("src/widgets.ts", 8, 1),
+		kind: "class".to_owned(),
+	}]);
+
+	let md = report.format_markdown();
+
+	assert!(md.contains("## Unused Exports"), "exports report must have h2 heading");
+	assert!(md.contains("| Symbol |"), "exports report must have Symbol column");
+	assert!(md.contains("| Kind |"), "exports report must have Kind column");
+	assert!(md.contains("| Location |"), "exports report must have Location column");
+	assert!(md.contains("MyWidget"), "exports report must list the symbol");
+	assert!(md.contains("src/widgets.ts:8:1"), "exports report must show location");
+}
+
+#[test]
+fn lsp_parity_tree_view_imports_report_markdown_has_table_and_heading() {
+	let report = UnusedImportsReport::new(vec![UnusedImport {
+		name: "debounce".to_owned(),
+		source: "lodash".to_owned(),
+		location: Location::at("src/search.ts", 3, 1),
+	}]);
+
+	let md = report.format_markdown();
+
+	assert!(md.contains("## Unused Imports"), "imports report must have h2 heading");
+	assert!(md.contains("| Symbol |"), "imports report must have Symbol column");
+	assert!(md.contains("| Source |"), "imports report must have Source column");
+	assert!(md.contains("| Location |"), "imports report must have Location column");
+	assert!(md.contains("debounce"), "imports report must list the symbol");
+	assert!(md.contains("lodash"), "imports report must show source module");
+	assert!(md.contains("src/search.ts:3:1"), "imports report must show location");
+}
+
+#[test]
+fn lsp_parity_tree_view_exports_report_empty_state_is_clean() {
+	let report = UnusedExportsReport::default();
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("No unused exports found"),
+		"empty exports report must show clean message"
+	);
+	assert!(md.contains('✓'), "empty exports report must show checkmark");
+}
+
+#[test]
+fn lsp_parity_tree_view_imports_report_empty_state_is_clean() {
+	let report = UnusedImportsReport::default();
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("No unused imports found"),
+		"empty imports report must show clean message"
+	);
+	assert!(md.contains('✓'), "empty imports report must show checkmark");
+}
+
+#[test]
+fn lsp_parity_tree_view_exports_report_count_in_heading() {
+	let report = UnusedExportsReport::new(vec![
+		UnusedExport {
+			name: "A".to_owned(),
+			location: Location::file("a.ts"),
+			kind: "function".to_owned(),
+		},
+		UnusedExport {
+			name: "B".to_owned(),
+			location: Location::file("b.ts"),
+			kind: "type".to_owned(),
+		},
+		UnusedExport {
+			name: "C".to_owned(),
+			location: Location::file("c.ts"),
+			kind: "variable".to_owned(),
+		},
+	]);
+
+	let md = report.format_markdown();
+	assert!(md.contains("3 found"), "exports report heading must show count");
+}
+
+#[test]
+fn lsp_parity_tree_view_cycles_report_formats_arrow_chain() {
+	let report = CyclesReport::new(vec![Cycle::new(vec!["src/a.ts", "src/b.ts", "src/a.ts"])]);
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("## Circular Dependencies"),
+		"cycles report must have h2 heading"
+	);
+	assert!(
+		md.contains("src/a.ts → src/b.ts → src/a.ts"),
+		"cycles report must use arrow chain format"
+	);
+	assert!(md.contains("1 found"), "cycles report must show count");
+}
+
+#[test]
+fn lsp_parity_tree_view_references_report_lists_locations() {
+	let report = ReferencesReport::new(
+		"processData",
+		vec![
+			Reference::new(Location::at("src/handler.ts", 12, 5)),
+			Reference::with_snippet(Location::at("src/worker.ts", 7, 3), "processData(payload)"),
+		],
+	);
+
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("## References: `processData`"),
+		"references report must name the symbol"
+	);
+	assert!(
+		md.contains("src/handler.ts:12:5"),
+		"references report must list first location"
+	);
+	assert!(
+		md.contains("src/worker.ts:7:3"),
+		"references report must list second location"
+	);
+	assert!(
+		md.contains("processData(payload)"),
+		"references report must include snippet"
+	);
+	assert!(md.contains("2 found"), "references report must show count");
+}
+
+// ---------------------------------------------------------------------------
+// CodeLens → slash-command output format tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lsp_parity_codelens_workspace_summary_report_is_knip_report_surface() {
+	let report = WorkspaceSummaryReport::new(
+		UnusedExportsReport::new(vec![UnusedExport {
+			name: "staleExport".to_owned(),
+			location: Location::at("src/old.ts", 5, 1),
+			kind: "function".to_owned(),
+		}]),
+		UnusedImportsReport::default(),
+		CyclesReport::default(),
+	);
+
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("# Knip Report"),
+		"workspace summary must have top-level h1 heading"
+	);
+	assert!(
+		md.contains("## Unused Exports"),
+		"workspace summary must include exports section"
+	);
+	assert!(
+		md.contains("staleExport"),
+		"workspace summary must list the unused export"
+	);
+}
+
+#[test]
+fn lsp_parity_codelens_clean_workspace_summary_shows_single_message() {
+	let report = WorkspaceSummaryReport::default();
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("# Knip Report"),
+		"clean workspace summary must have h1 heading"
+	);
+	assert!(
+		md.contains("Workspace is clean"),
+		"clean workspace summary must show clean message"
+	);
+	assert!(
+		!md.contains("## Unused"),
+		"clean workspace summary must not show sub-sections"
+	);
+}
+
+#[test]
+fn lsp_parity_codelens_workspace_summary_includes_all_sections_when_dirty() {
+	let report = WorkspaceSummaryReport::new(
+		UnusedExportsReport::new(vec![UnusedExport {
+			name: "Foo".to_owned(),
+			location: Location::file("foo.ts"),
+			kind: "class".to_owned(),
+		}]),
+		UnusedImportsReport::new(vec![UnusedImport {
+			name: "bar".to_owned(),
+			source: "bar-lib".to_owned(),
+			location: Location::file("bar.ts"),
+		}]),
+		CyclesReport::new(vec![Cycle::new(vec!["x.ts", "y.ts"])]),
+	);
+
+	let md = report.format_markdown();
+
+	assert!(
+		md.contains("## Unused Exports"),
+		"dirty workspace must include exports section"
+	);
+	assert!(
+		md.contains("## Unused Imports"),
+		"dirty workspace must include imports section"
+	);
+	assert!(
+		md.contains("## Circular Dependencies"),
+		"dirty workspace must include cycles section"
+	);
 }
