@@ -1,20 +1,18 @@
 use crate::{
 	cache::{InstallSource, WorktreeCache},
 	errors::KnipError,
+	is_executable,
 	package_manager::{self, PackageManager, PackageManagerError},
 	settings::KnipSettings,
 };
-use std::{
-	env, fmt, fs,
-	path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use zed_extension_api as zed;
 
 const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
-const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
-const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
-const DID_SAVE_REFRESH_PATCH_MARKER: &str = "zed-knip: refresh Knip diagnostics on textDocument/didSave";
 
+pub use crate::managed_install::{ManagedInstall, ManagedInstallDisabled, ZedNpmManagedInstall};
+
+/// Resolved Knip executable and package-manager state for a workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedKnip {
 	pub executable_path: PathBuf,
@@ -22,70 +20,14 @@ pub struct ResolvedKnip {
 	pub install_source: InstallSource,
 }
 
+/// Prepared command payload used to launch the Knip language server.
 #[derive(Debug, Clone)]
 pub struct KnipLanguageServerCommand {
 	pub command: zed::Command,
 	pub working_dir: PathBuf,
 }
 
-pub trait ManagedInstall {
-	fn install(&self, workspace_root: &Path, package_manager: PackageManager) -> Result<PathBuf, KnipError>;
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ManagedInstallDisabled;
-
-impl ManagedInstall for ManagedInstallDisabled {
-	fn install(&self, _workspace_root: &Path, _package_manager: PackageManager) -> Result<PathBuf, KnipError> {
-		Err(KnipError::FailedManagedInstall {
-			reason: "managed install is not configured".to_string(),
-		})
-	}
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ZedNpmManagedInstall;
-
-impl ManagedInstall for ZedNpmManagedInstall {
-	fn install(&self, _workspace_root: &Path, _package_manager: PackageManager) -> Result<PathBuf, KnipError> {
-		let executable_path = env::current_dir()
-			.map_err(|error| KnipError::FailedManagedInstall {
-				reason: format!("failed to resolve extension working directory: {error}"),
-			})?
-			.join(MANAGED_LANGUAGE_SERVER_BIN);
-
-		let installed_version = zed::npm_package_installed_version(LANGUAGE_SERVER_PACKAGE).map_err(|error| {
-			KnipError::FailedManagedInstall {
-				reason: format!("failed to inspect installed {LANGUAGE_SERVER_PACKAGE}: {error}"),
-			}
-		})?;
-
-		let latest_version = match zed::npm_package_latest_version(LANGUAGE_SERVER_PACKAGE) {
-			Ok(version) => version,
-			Err(error) if installed_version.is_some() && executable_path.is_file() => {
-				patch_managed_language_server(&executable_path)?;
-				return Ok(executable_path);
-			}
-			Err(error) => {
-				return Err(KnipError::NetworkUnavailable {
-					detail: format!("failed to resolve latest {LANGUAGE_SERVER_PACKAGE}: {error}"),
-				});
-			}
-		};
-
-		if installed_version.as_ref() != Some(&latest_version) {
-			zed::npm_install_package(LANGUAGE_SERVER_PACKAGE, &latest_version).map_err(|error| {
-				KnipError::FailedManagedInstall {
-					reason: format!("failed to install {LANGUAGE_SERVER_PACKAGE}@{latest_version}: {error}"),
-				}
-			})?;
-		}
-
-		patch_managed_language_server(&executable_path)?;
-		Ok(executable_path)
-	}
-}
-
+/// Resolves the Knip language-server executable for a workspace.
 pub fn resolve_knip(
 	settings: &KnipSettings,
 	cache: &WorktreeCache,
@@ -138,6 +80,7 @@ pub fn resolve_knip(
 	})
 }
 
+/// Builds the final Zed command used to launch the Knip language server.
 pub fn build_language_server_command(
 	resolved: &ResolvedKnip,
 	settings: &KnipSettings,
@@ -187,18 +130,7 @@ fn resolve_package_manager(settings: &KnipSettings, cache: &WorktreeCache) -> Re
 }
 
 fn parse_package_manager_setting(package_manager: &str) -> Result<PackageManager, KnipError> {
-	match package_manager.trim() {
-		"npm" => Ok(PackageManager::Npm),
-		"pnpm" => Ok(PackageManager::Pnpm),
-		"yarn" => Ok(PackageManager::Yarn),
-		"bun" => Ok(PackageManager::Bun),
-		"deno" => Ok(PackageManager::Deno),
-		"vlt" => Ok(PackageManager::Vlt),
-		"aube" => Ok(PackageManager::Aube),
-		found => Err(KnipError::UnsupportedPackageManager {
-			found: found.to_string(),
-		}),
-	}
+	package_manager::parse(package_manager).map_err(package_manager_error_to_knip_error)
 }
 
 fn package_manager_error_to_knip_error(error: PackageManagerError) -> KnipError {
@@ -226,74 +158,6 @@ fn managed_cache_path(cache: &WorktreeCache) -> Option<PathBuf> {
 	}
 }
 
-fn patch_managed_language_server(executable_path: &Path) -> Result<(), KnipError> {
-	let server_path = managed_language_server_server_path(executable_path)?;
-	let source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
-		reason: format!("failed to read managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
-	})?;
-	let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
-		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
-	})?
-	else {
-		return Ok(());
-	};
-
-	fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
-		reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
-	})
-}
-
-fn managed_language_server_server_path(executable_path: &Path) -> Result<PathBuf, KnipError> {
-	let cli_path = match fs::read_link(executable_path) {
-		Ok(target) if target.is_absolute() => target,
-		Ok(target) => executable_path.parent().unwrap_or_else(|| Path::new("")).join(target),
-		Err(error) => {
-			return Err(KnipError::FailedManagedInstall {
-				reason: format!("failed to resolve managed {LANGUAGE_SERVER_BIN} symlink: {error}"),
-			});
-		}
-	};
-
-	Ok(cli_path.parent().unwrap_or_else(|| Path::new("")).join("server.js"))
-}
-
-fn apply_did_save_refresh_patch(source: &str) -> Result<Option<String>, String> {
-	if source.contains(DID_SAVE_REFRESH_PATCH_MARKER) {
-		return Ok(None);
-	}
-
-	let patched = replace_once(
-		source,
-		"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';",
-		"import { FileChangeType, ProposedFeatures, TextDocumentSyncKind, TextDocuments } from 'vscode-languageserver';",
-		"vscode-languageserver import",
-	)?;
-	let patched = replace_once(
-		&patched,
-		"const capabilities = {\n        codeActionProvider:",
-		"const capabilities = {\n        textDocumentSync: {\n          openClose: true,\n          change: TextDocumentSyncKind.None,\n          save: { includeText: false },\n        },\n        codeActionProvider:",
-		"initialize capabilities",
-	)?;
-	let patched = replace_once(
-		&patched,
-		"this.documents.listen(this.connection);\n    this.connection.listen();",
-		&format!(
-			"this.documents.listen(this.connection);\n    // {DID_SAVE_REFRESH_PATCH_MARKER}\n    this.documents.onDidSave(event => {{\n      void this.handleFileChanges({{ changes: [{{ uri: event.document.uri, type: FileChangeType.Changed }}] }});\n    }});\n    this.connection.listen();"
-		),
-		"document save listener",
-	)?;
-
-	Ok(Some(patched))
-}
-
-fn replace_once(source: &str, needle: &str, replacement: &str, label: &str) -> Result<String, String> {
-	if !source.contains(needle) {
-		return Err(format!("missing {label} patch anchor"));
-	}
-
-	Ok(source.replacen(needle, replacement, 1))
-}
-
 fn resolve_configured_path(workspace_root: &Path, configured_path: &str) -> PathBuf {
 	let path = PathBuf::from(configured_path);
 	if path.is_absolute() {
@@ -304,26 +168,20 @@ fn resolve_configured_path(workspace_root: &Path, configured_path: &str) -> Path
 }
 
 fn validate_explicit_path(path: &Path) -> Result<(), KnipError> {
-	if !path.is_file() {
-		return Err(KnipError::InvalidExplicitPath {
-			path: path.to_path_buf(),
-		});
-	}
-
-	if !is_executable(path) {
-		return Err(KnipError::NonExecutablePath {
-			path: path.to_path_buf(),
-		});
-	}
-
-	Ok(())
+	validate_executable_path(path, |missing_path| KnipError::InvalidExplicitPath {
+		path: missing_path,
+	})
 }
 
 fn validate_candidate_path(path: &Path) -> Result<(), KnipError> {
+	validate_executable_path(path, |missing_path| KnipError::MissingKnip {
+		workspace_root: missing_path.parent().unwrap_or(missing_path.as_path()).to_path_buf(),
+	})
+}
+
+fn validate_executable_path(path: &Path, missing_error: impl FnOnce(PathBuf) -> KnipError) -> Result<(), KnipError> {
 	if !path.is_file() {
-		return Err(KnipError::MissingKnip {
-			workspace_root: path.parent().unwrap_or(path).to_path_buf(),
-		});
+		return Err(missing_error(path.to_path_buf()));
 	}
 
 	if !is_executable(path) {
@@ -333,39 +191,14 @@ fn validate_candidate_path(path: &Path) -> Result<(), KnipError> {
 	}
 
 	Ok(())
-}
-
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-	use std::os::unix::fs::PermissionsExt;
-
-	std::fs::metadata(path)
-		.map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-		.unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-	path.is_file()
-}
-
-impl fmt::Display for PackageManager {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::Npm => f.write_str("npm"),
-			Self::Pnpm => f.write_str("pnpm"),
-			Self::Yarn => f.write_str("yarn"),
-			Self::Bun => f.write_str("bun"),
-			Self::Deno => f.write_str("deno"),
-			Self::Vlt => f.write_str("vlt"),
-			Self::Aube => f.write_str("aube"),
-		}
-	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::managed_install::{
+		apply_did_save_refresh_patch, patch_managed_language_server, DID_SAVE_REFRESH_PATCH_MARKER,
+	};
 	use crate::settings::LogLevel;
 	use std::{
 		fs::{self, File},

@@ -11,10 +11,6 @@
 
 use std::fmt;
 
-// ---------------------------------------------------------------------------
-// Shared primitives
-// ---------------------------------------------------------------------------
-
 /// A source location: file path plus optional line/column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
@@ -59,18 +55,10 @@ impl fmt::Display for Location {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Trait
-// ---------------------------------------------------------------------------
-
 /// Render a report as a markdown string for Zed slash-command output.
 pub trait FormatMarkdown {
 	fn format_markdown(&self) -> String;
 }
-
-// ---------------------------------------------------------------------------
-// Unused exports report  (VSCode: Exports tree view)
-// ---------------------------------------------------------------------------
 
 /// A single unused export symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,10 +110,6 @@ impl FormatMarkdown for UnusedExportsReport {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Unused imports report  (VSCode: Imports tree view)
-// ---------------------------------------------------------------------------
-
 /// A single unused import.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnusedImport {
@@ -175,10 +159,6 @@ impl FormatMarkdown for UnusedImportsReport {
 		out
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Cycle report  (VSCode: contention/cycle display)
-// ---------------------------------------------------------------------------
 
 /// One circular dependency cycle: an ordered list of file paths forming the loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,10 +212,6 @@ impl FormatMarkdown for CyclesReport {
 		out
 	}
 }
-
-// ---------------------------------------------------------------------------
-// References report  (VSCode: knip.showReferences command)
-// ---------------------------------------------------------------------------
 
 /// One reference to a symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,10 +281,6 @@ impl FormatMarkdown for ReferencesReport {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Combined workspace summary
-// ---------------------------------------------------------------------------
-
 /// Aggregated workspace-level Knip report.
 ///
 /// Combines all sub-reports into a single markdown document, suitable for a
@@ -351,15 +323,9 @@ impl FormatMarkdown for WorkspaceSummaryReport {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	// --- Location ---
 
 	#[test]
 	fn location_file_only_displays_path() {
@@ -382,8 +348,6 @@ mod tests {
 		};
 		assert_eq!(loc.to_string(), "src/a.ts:3");
 	}
-
-	// --- UnusedExportsReport ---
 
 	#[test]
 	fn unused_exports_empty_report_shows_clean_message() {
@@ -425,8 +389,6 @@ mod tests {
 		assert!(report.format_markdown().contains("2 found"));
 	}
 
-	// --- UnusedImportsReport ---
-
 	#[test]
 	fn unused_imports_empty_report_shows_clean_message() {
 		let report = UnusedImportsReport::default();
@@ -446,8 +408,6 @@ mod tests {
 		assert!(md.contains("react"));
 		assert!(md.contains("src/App.tsx:1:10"));
 	}
-
-	// --- CyclesReport ---
 
 	#[test]
 	fn cycles_empty_report_shows_clean_message() {
@@ -476,8 +436,6 @@ mod tests {
 		assert!(md.contains("2 found"));
 	}
 
-	// --- ReferencesReport ---
-
 	#[test]
 	fn references_empty_report_shows_no_references_message() {
 		let report = ReferencesReport::new("myFn", vec![]);
@@ -502,8 +460,6 @@ mod tests {
 		assert!(md.contains("doThing(arg)"));
 		assert!(md.contains("2 found"));
 	}
-
-	// --- WorkspaceSummaryReport ---
 
 	#[test]
 	fn workspace_summary_clean_workspace_shows_clean_message() {
@@ -546,8 +502,6 @@ mod tests {
 		};
 		assert!(!with_export.is_clean());
 	}
-
-	// --- VSCode tree view → Zed markdown report mapping ---
 
 	#[test]
 	fn vscode_exports_tree_view_maps_to_knip_exports_slash_command_markdown() {
@@ -630,8 +584,6 @@ mod tests {
 		assert!(!md.contains("| Symbol |"), "must not show table when empty");
 	}
 
-	// --- VSCode CodeLens → Zed slash-command mapping ---
-
 	#[test]
 	fn vscode_codelens_import_counts_maps_to_knip_report_slash_command_markdown() {
 		let report = WorkspaceSummaryReport::new(
@@ -705,156 +657,4 @@ mod tests {
 			"beta.ts has 1 unused export (CodeLens count = 1)"
 		);
 	}
-}
-
-/// The VSCode Imports tree view maps to `/knip-imports` slash command.
-/// This test verifies the markdown output produced by `UnusedImportsReport`
-/// is suitable for a Zed slash-command response.
-#[test]
-fn vscode_imports_tree_view_maps_to_knip_imports_slash_command_markdown() {
-	let report = UnusedImportsReport::new(vec![
-		UnusedImport {
-			name: "useEffect".to_owned(),
-			source: "react".to_owned(),
-			location: Location::at("src/App.tsx", 2, 3),
-		},
-		UnusedImport {
-			name: "clsx".to_owned(),
-			source: "clsx".to_owned(),
-			location: Location::at("src/Button.tsx", 1, 1),
-		},
-	]);
-
-	let md = report.format_markdown();
-
-	// Heading suitable for slash-command panel output.
-	assert!(md.contains("## Unused Imports"), "must have markdown heading");
-	// Count shown in heading.
-	assert!(md.contains("2 found"), "must show entry count");
-	// Table structure.
-	assert!(md.contains("| Symbol |"), "must have Symbol column header");
-	assert!(md.contains("| Source |"), "must have Source column header");
-	assert!(md.contains("| Location |"), "must have Location column header");
-	// Symbol names present.
-	assert!(md.contains("useEffect"), "must list useEffect symbol");
-	assert!(md.contains("clsx"), "must list clsx symbol");
-	// Source modules present.
-	assert!(md.contains("react"), "must show react source");
-	// Locations present.
-	assert!(md.contains("src/App.tsx:2:3"), "must show App.tsx location");
-	assert!(md.contains("src/Button.tsx:1:1"), "must show Button.tsx location");
-}
-
-/// The VSCode Exports tree view empty state maps to a clean message.
-#[test]
-fn vscode_exports_tree_view_empty_state_shows_clean_message() {
-	let report = UnusedExportsReport::default();
-	let md = report.format_markdown();
-
-	assert!(md.contains("## Unused Exports"), "must have heading even when empty");
-	assert!(md.contains("No unused exports found"), "must show clean message");
-	assert!(md.contains('✓'), "must show checkmark for clean state");
-	// No table when empty.
-	assert!(!md.contains("| Symbol |"), "must not show table when empty");
-}
-
-/// The VSCode Imports tree view empty state maps to a clean message.
-#[test]
-fn vscode_imports_tree_view_empty_state_shows_clean_message() {
-	let report = UnusedImportsReport::default();
-	let md = report.format_markdown();
-
-	assert!(md.contains("## Unused Imports"), "must have heading even when empty");
-	assert!(md.contains("No unused imports found"), "must show clean message");
-	assert!(md.contains('✓'), "must show checkmark for clean state");
-	assert!(!md.contains("| Symbol |"), "must not show table when empty");
-}
-
-// --- VSCode CodeLens → Zed slash-command mapping ---
-
-/// VSCode CodeLens shows import counts inline in the editor.
-/// Zed has no CodeLens API; the equivalent is `/knip-report` slash command.
-/// This test verifies the `WorkspaceSummaryReport` markdown is suitable as
-/// the `/knip-report` response (the CodeLens Zed-equivalent surface).
-#[test]
-fn vscode_codelens_import_counts_maps_to_knip_report_slash_command_markdown() {
-	let report = WorkspaceSummaryReport::new(
-		UnusedExportsReport::new(vec![UnusedExport {
-			name: "unusedFn".to_owned(),
-			location: Location::at("src/lib.ts", 10, 1),
-			kind: "function".to_owned(),
-		}]),
-		UnusedImportsReport::new(vec![UnusedImport {
-			name: "lodash".to_owned(),
-			source: "lodash".to_owned(),
-			location: Location::at("src/helpers.ts", 1, 1),
-		}]),
-		CyclesReport::default(),
-	);
-
-	let md = report.format_markdown();
-
-	// Top-level heading for slash-command panel.
-	assert!(md.contains("# Knip Report"), "must have top-level heading");
-	// Both sub-sections present (CodeLens covered exports + imports counts).
-	assert!(md.contains("## Unused Exports"), "must include exports section");
-	assert!(md.contains("## Unused Imports"), "must include imports section");
-	// Symbol data present.
-	assert!(md.contains("unusedFn"), "must list unused export");
-	assert!(md.contains("lodash"), "must list unused import");
-}
-
-/// When the workspace is clean, `/knip-report` (CodeLens equivalent) shows
-/// a single clean-state message rather than empty tables.
-#[test]
-fn vscode_codelens_clean_workspace_shows_single_clean_message() {
-	let report = WorkspaceSummaryReport::default();
-	let md = report.format_markdown();
-
-	assert!(md.contains("# Knip Report"), "must have top-level heading");
-	assert!(md.contains("Workspace is clean"), "must show clean message");
-	assert!(md.contains('✓'), "must show checkmark");
-	// No sub-section headings when clean.
-	assert!(
-		!md.contains("## Unused Exports"),
-		"must not show sub-sections when clean"
-	);
-}
-
-/// CodeLens import count for a single file is represented by filtering
-/// `UnusedExportsReport` entries by file — verify location field is usable
-/// as a file filter key.
-#[test]
-fn vscode_codelens_per_file_import_count_uses_location_file_field() {
-	let entries = [
-		UnusedExport {
-			name: "Alpha".to_owned(),
-			location: Location::at("src/alpha.ts", 1, 1),
-			kind: "function".to_owned(),
-		},
-		UnusedExport {
-			name: "Beta".to_owned(),
-			location: Location::at("src/beta.ts", 5, 1),
-			kind: "class".to_owned(),
-		},
-		UnusedExport {
-			name: "Gamma".to_owned(),
-			location: Location::at("src/alpha.ts", 12, 1),
-			kind: "variable".to_owned(),
-		},
-	];
-
-	let alpha_entries: Vec<_> = entries.iter().filter(|e| e.location.file == "src/alpha.ts").collect();
-	assert_eq!(
-		alpha_entries.len(),
-		2,
-		"alpha.ts has 2 unused exports (CodeLens count = 2)"
-	);
-
-	let beta_entries: Vec<_> = entries.iter().filter(|e| e.location.file == "src/beta.ts").collect();
-	assert_eq!(
-		beta_entries.len(),
-		1,
-		"beta.ts has 1 unused export (CodeLens count = 1)"
-	);
 }

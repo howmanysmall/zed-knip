@@ -12,8 +12,9 @@ use crate::{
 	cache::WorktreeCache,
 	config_detection::known_config_file_names,
 	errors::KnipError,
+	managed_install::ZedNpmManagedInstall,
 	package_manager::PackageManagerError,
-	resolver::{build_language_server_command, resolve_knip, ZedNpmManagedInstall},
+	resolver::{build_language_server_command, resolve_knip},
 	settings::{KnipSettings, LogLevel},
 };
 use std::path::PathBuf;
@@ -22,6 +23,22 @@ use zed_extension_api as zed;
 const KNIP_LANGUAGE_SERVER_ID: &str = "knip";
 
 pub struct ZedKnipExtension;
+
+pub(crate) fn is_executable(path: &std::path::Path) -> bool {
+	#[cfg(unix)]
+	{
+		use std::os::unix::fs::PermissionsExt;
+
+		std::fs::metadata(path)
+			.map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+			.unwrap_or(false)
+	}
+
+	#[cfg(not(unix))]
+	{
+		path.is_file()
+	}
+}
 
 impl zed::Extension for ZedKnipExtension {
 	fn new() -> Self {
@@ -65,7 +82,7 @@ impl zed::Extension for ZedKnipExtension {
 
 trait WorktreeAdapter {
 	fn root_path(&self) -> PathBuf;
-	fn lsp_settings(&self, language_server_id: &str) -> zed::Result<Option<ZedKnipSettings>>;
+	fn lsp_settings(&self, language_server_id: &str) -> zed::Result<Option<KnipSettings>>;
 	fn read_text_file(&self, relative_path: &str) -> Option<String>;
 }
 
@@ -77,17 +94,6 @@ trait CommandResolver {
 	) -> Result<zed::Command, KnipError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-struct ZedKnipSettings {
-	server_path: Option<String>,
-	package_manager: Option<String>,
-	auto_install: Option<bool>,
-	log_level: Option<LogLevel>,
-	extra_args: Option<Vec<String>>,
-	config_path: Option<String>,
-	require_config: Option<bool>,
-}
-
 struct ZedWorktreeAdapter<'a> {
 	worktree: &'a zed::Worktree,
 }
@@ -97,9 +103,9 @@ impl WorktreeAdapter for ZedWorktreeAdapter<'_> {
 		PathBuf::from(self.worktree.root_path())
 	}
 
-	fn lsp_settings(&self, language_server_id: &str) -> zed::Result<Option<ZedKnipSettings>> {
+	fn lsp_settings(&self, language_server_id: &str) -> zed::Result<Option<KnipSettings>> {
 		let settings = zed::settings::LspSettings::for_worktree(language_server_id, self.worktree)?;
-		Ok(Some(ZedKnipSettings::from_lsp_settings(settings)?))
+		Ok(Some(settings_from_lsp_settings(settings)?))
 	}
 
 	fn read_text_file(&self, relative_path: &str) -> Option<String> {
@@ -205,7 +211,7 @@ fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Val
 
 fn settings_for_worktree(
 	worktree: &impl WorktreeAdapter,
-	overrides: Option<ZedKnipSettings>,
+	overrides: Option<KnipSettings>,
 ) -> zed::Result<KnipSettings> {
 	let mut settings = KnipSettings::default();
 	if let Some(overrides) = overrides {
@@ -258,75 +264,82 @@ fn package_manager_error_to_zed_error(error: PackageManagerError) -> String {
 	}
 }
 
-fn apply_zed_settings(mut settings: KnipSettings, overrides: ZedKnipSettings) -> KnipSettings {
-	settings.server_path = overrides.server_path.or(settings.server_path);
-	settings.package_manager = overrides.package_manager.or(settings.package_manager);
-	if let Some(auto_install) = overrides.auto_install {
-		settings.auto_install = auto_install;
-	}
-	if let Some(log_level) = overrides.log_level {
-		settings.log_level = log_level;
-	}
-	if let Some(extra_args) = overrides.extra_args {
-		settings.extra_args = extra_args;
-	}
-	settings.config_path = overrides.config_path.or(settings.config_path);
-	if let Some(require_config) = overrides.require_config {
-		settings.require_config = require_config;
-	}
-	settings
+fn apply_zed_settings(settings: KnipSettings, overrides: KnipSettings) -> KnipSettings {
+	settings.merge(overrides)
 }
 
-impl ZedKnipSettings {
-	fn from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Result<Self> {
-		let mut overrides = Self::default();
+fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Result<KnipSettings> {
+	let mut overrides = KnipSettings::default();
 
-		if let Some(binary) = settings.binary {
-			overrides.server_path = binary.path;
-			overrides.extra_args = binary.arguments;
-			if let Some(env) = binary.env {
-				overrides.package_manager = env.get("KNIP_PACKAGE_MANAGER").cloned();
-				if let Some(log_level) = env.get("KNIP_LOG_LEVEL") {
-					overrides.log_level = Some(log_level.parse::<LogLevel>().map_err(|error| error.to_string())?);
-				}
+	if let Some(binary) = settings.binary {
+		overrides.server_path = binary.path;
+		if let Some(arguments) = binary.arguments {
+			overrides.extra_args = arguments;
+		}
+		if let Some(env) = binary.env {
+			overrides.package_manager = env.get("KNIP_PACKAGE_MANAGER").cloned();
+			if let Some(log_level) = env.get("KNIP_LOG_LEVEL") {
+				overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
 			}
 		}
-
-		if let Some(custom_settings) = settings.settings {
-			apply_custom_lsp_settings(&mut overrides, &custom_settings)?;
-		}
-
-		Ok(overrides)
 	}
+
+	if let Some(custom_settings) = settings.settings {
+		apply_custom_lsp_settings(&mut overrides, &custom_settings)?;
+	}
+
+	Ok(overrides)
 }
 
-fn apply_custom_lsp_settings(overrides: &mut ZedKnipSettings, settings: &zed::serde_json::Value) -> zed::Result<()> {
-	if let Some(server_path) = settings.get("server_path").and_then(zed::serde_json::Value::as_str) {
-		overrides.server_path = Some(server_path.to_string());
+fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde_json::Value) -> zed::Result<()> {
+	if let Some(server_path) = settings
+		.get("server_path")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.server_path = Some(server_path);
 	}
-	if let Some(package_manager) = settings.get("package_manager").and_then(zed::serde_json::Value::as_str) {
-		overrides.package_manager = Some(package_manager.to_string());
+	if let Some(package_manager) = settings
+		.get("package_manager")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.package_manager = Some(package_manager);
 	}
-	if let Some(auto_install) = settings.get("auto_install").and_then(zed::serde_json::Value::as_bool) {
-		overrides.auto_install = Some(auto_install);
+	if let Some(auto_install) = settings
+		.get("auto_install")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<bool>(value).ok())
+	{
+		overrides.auto_install = auto_install;
 	}
-	if let Some(log_level) = settings.get("log_level").and_then(zed::serde_json::Value::as_str) {
-		overrides.log_level = Some(log_level.parse::<LogLevel>().map_err(|error| error.to_string())?);
+	if let Some(log_level) = settings
+		.get("log_level")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
 	}
-	if let Some(config_path) = settings.get("config_path").and_then(zed::serde_json::Value::as_str) {
-		overrides.config_path = Some(config_path.to_string());
+	if let Some(config_path) = settings
+		.get("config_path")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.config_path = Some(config_path);
 	}
-	if let Some(require_config) = settings.get("require_config").and_then(zed::serde_json::Value::as_bool) {
-		overrides.require_config = Some(require_config);
+	if let Some(require_config) = settings
+		.get("require_config")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<bool>(value).ok())
+	{
+		overrides.require_config = require_config;
 	}
 	if let Some(extra_args) = settings.get("extra_args").and_then(zed::serde_json::Value::as_array) {
-		overrides.extra_args = Some(
-			extra_args
-				.iter()
-				.filter_map(zed::serde_json::Value::as_str)
-				.map(str::to_string)
-				.collect(),
-		);
+		overrides.extra_args = extra_args
+			.iter()
+			.filter_map(zed::serde_json::Value::as_str)
+			.map(str::to_string)
+			.collect();
 	}
 
 	Ok(())
@@ -353,6 +366,7 @@ const MODULE_COUNT: usize = 9;
 mod tests {
 	use super::*;
 	use std::{
+		collections::HashMap,
 		fs,
 		path::Path,
 		time::{SystemTime, UNIX_EPOCH},
@@ -396,7 +410,7 @@ mod tests {
 			self.root.clone()
 		}
 
-		fn lsp_settings(&self, _language_server_id: &str) -> zed::Result<Option<ZedKnipSettings>> {
+		fn lsp_settings(&self, _language_server_id: &str) -> zed::Result<Option<KnipSettings>> {
 			Ok(None)
 		}
 
@@ -446,6 +460,62 @@ mod tests {
 	#[test]
 	fn scaffold_smoke_test() {
 		assert_eq!(super::MODULE_COUNT, 9);
+	}
+
+	#[test]
+	fn lsp_settings_use_knip_settings_directly_for_binary_and_custom_overrides() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: Some("tools/knip-language-server".to_string()),
+				arguments: Some(vec!["--from-binary".to_string()]),
+				env: Some(HashMap::from([
+					("KNIP_PACKAGE_MANAGER".to_string(), "npm".to_string()),
+					("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
+				])),
+			}),
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"package_manager": "pnpm",
+				"auto_install": false,
+				"log_level": "warn",
+				"extra_args": ["--from-settings"],
+				"config_path": "knip.ts",
+				"require_config": true
+			})),
+		})
+		.unwrap();
+
+		assert_eq!(
+			settings,
+			KnipSettings {
+				server_path: Some("tools/knip-language-server".to_string()),
+				package_manager: Some("pnpm".to_string()),
+				auto_install: false,
+				log_level: LogLevel::Warn,
+				extra_args: vec!["--from-settings".to_string()],
+				config_path: Some("knip.ts".to_string()),
+				require_config: true,
+			}
+		);
+	}
+
+	#[test]
+	fn lsp_settings_keep_binary_arguments_when_custom_extra_args_are_missing() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: Some(vec!["--binary-only".to_string()]),
+				env: None,
+			}),
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"config_path": "knip.ts"
+			})),
+		})
+		.unwrap();
+
+		assert_eq!(settings.extra_args, vec!["--binary-only".to_string()]);
+		assert_eq!(settings.config_path.as_deref(), Some("knip.ts"));
 	}
 
 	#[test]

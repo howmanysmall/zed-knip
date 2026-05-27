@@ -1,22 +1,157 @@
 use crate::{
 	cache::{CacheState, InstallSource, InvalidationInputs, StaleReason, WorktreeCache},
 	errors::KnipError,
+	is_executable,
 	logging::{InstallProgress, Logger},
 	package_manager::PackageManager,
-	resolver::ManagedInstall,
 	settings::KnipSettings,
 };
 use std::{
 	collections::hash_map::DefaultHasher,
-	fs,
+	env, fs,
 	hash::{Hash, Hasher},
 	io,
 	path::{Path, PathBuf},
 };
+use zed_extension_api as zed;
 
 const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
+const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
+const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
+pub(crate) const DID_SAVE_REFRESH_PATCH_MARKER: &str = "zed-knip: refresh Knip diagnostics on textDocument/didSave";
 const DEFAULT_MANAGED_VERSION: &str = "latest";
 
+/// Resolves or installs a managed Knip language-server binary for a workspace.
+pub trait ManagedInstall {
+	/// Installs the language server and returns the executable path.
+	fn install(&self, workspace_root: &Path, package_manager: PackageManager) -> Result<PathBuf, KnipError>;
+}
+
+/// Managed-install implementation that always reports configuration as disabled.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ManagedInstallDisabled;
+
+impl ManagedInstall for ManagedInstallDisabled {
+	fn install(&self, _workspace_root: &Path, _package_manager: PackageManager) -> Result<PathBuf, KnipError> {
+		Err(KnipError::FailedManagedInstall {
+			reason: "managed install is not configured".to_string(),
+		})
+	}
+}
+
+/// Managed-install implementation backed by Zed's npm host APIs.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ZedNpmManagedInstall;
+
+impl ManagedInstall for ZedNpmManagedInstall {
+	fn install(&self, _workspace_root: &Path, _package_manager: PackageManager) -> Result<PathBuf, KnipError> {
+		let executable_path = env::current_dir()
+			.map_err(|error| KnipError::FailedManagedInstall {
+				reason: format!("failed to resolve extension working directory: {error}"),
+			})?
+			.join(MANAGED_LANGUAGE_SERVER_BIN);
+
+		let installed_version = zed::npm_package_installed_version(LANGUAGE_SERVER_PACKAGE).map_err(|error| {
+			KnipError::FailedManagedInstall {
+				reason: format!("failed to inspect installed {LANGUAGE_SERVER_PACKAGE}: {error}"),
+			}
+		})?;
+
+		let latest_version = match zed::npm_package_latest_version(LANGUAGE_SERVER_PACKAGE) {
+			Ok(version) => version,
+			Err(_error) if installed_version.is_some() && executable_path.is_file() => {
+				patch_managed_language_server(&executable_path)?;
+				return Ok(executable_path);
+			}
+			Err(error) => {
+				return Err(KnipError::NetworkUnavailable {
+					detail: format!("failed to resolve latest {LANGUAGE_SERVER_PACKAGE}: {error}"),
+				});
+			}
+		};
+
+		if installed_version.as_ref() != Some(&latest_version) {
+			zed::npm_install_package(LANGUAGE_SERVER_PACKAGE, &latest_version).map_err(|error| {
+				KnipError::FailedManagedInstall {
+					reason: format!("failed to install {LANGUAGE_SERVER_PACKAGE}@{latest_version}: {error}"),
+				}
+			})?;
+		}
+
+		patch_managed_language_server(&executable_path)?;
+		Ok(executable_path)
+	}
+}
+
+pub(crate) fn patch_managed_language_server(executable_path: &Path) -> Result<(), KnipError> {
+	let server_path = managed_language_server_server_path(executable_path)?;
+	let source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
+		reason: format!("failed to read managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+	})?;
+	let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+	})?
+	else {
+		return Ok(());
+	};
+
+	fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
+		reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+	})
+}
+
+fn managed_language_server_server_path(executable_path: &Path) -> Result<PathBuf, KnipError> {
+	let cli_path = match fs::read_link(executable_path) {
+		Ok(target) if target.is_absolute() => target,
+		Ok(target) => executable_path.parent().unwrap_or_else(|| Path::new("")).join(target),
+		Err(error) => {
+			return Err(KnipError::FailedManagedInstall {
+				reason: format!("failed to resolve managed {LANGUAGE_SERVER_BIN} symlink: {error}"),
+			});
+		}
+	};
+
+	Ok(cli_path.parent().unwrap_or_else(|| Path::new("")).join("server.js"))
+}
+
+pub(crate) fn apply_did_save_refresh_patch(source: &str) -> Result<Option<String>, String> {
+	if source.contains(DID_SAVE_REFRESH_PATCH_MARKER) {
+		return Ok(None);
+	}
+
+	let patched = replace_once(
+		source,
+		"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';",
+		"import { FileChangeType, ProposedFeatures, TextDocumentSyncKind, TextDocuments } from 'vscode-languageserver';",
+		"vscode-languageserver import",
+	)?;
+	let patched = replace_once(
+		&patched,
+		"const capabilities = {\n        codeActionProvider:",
+		"const capabilities = {\n        textDocumentSync: {\n          openClose: true,\n          change: TextDocumentSyncKind.None,\n          save: { includeText: false },\n        },\n        codeActionProvider:",
+		"initialize capabilities",
+	)?;
+	let patched = replace_once(
+		&patched,
+		"this.documents.listen(this.connection);\n    this.connection.listen();",
+		&format!(
+			"this.documents.listen(this.connection);\n    // {DID_SAVE_REFRESH_PATCH_MARKER}\n    this.documents.onDidSave(event => {{\n      void this.handleFileChanges({{ changes: [{{ uri: event.document.uri, type: FileChangeType.Changed }}] }});\n    }});\n    this.connection.listen();"
+		),
+		"document save listener",
+	)?;
+
+	Ok(Some(patched))
+}
+
+fn replace_once(source: &str, needle: &str, replacement: &str, label: &str) -> Result<String, String> {
+	if !source.contains(needle) {
+		return Err(format!("missing {label} patch anchor"));
+	}
+
+	Ok(source.replacen(needle, replacement, 1))
+}
+
+/// Parameters for a managed-install backend invocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedInstallRequest {
 	pub package_manager: PackageManager,
@@ -25,6 +160,7 @@ pub struct ManagedInstallRequest {
 	pub executable_path: PathBuf,
 }
 
+/// Backend-level failure modes surfaced during managed installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallFailure {
 	NetworkUnavailable { detail: String },
@@ -33,10 +169,12 @@ pub enum InstallFailure {
 	Failed { reason: String },
 }
 
+/// Low-level backend responsible for populating a managed cache directory.
 pub trait InstallBackend {
 	fn install(&self, request: &ManagedInstallRequest) -> Result<(), InstallFailure>;
 }
 
+/// Backend placeholder used when no managed-install backend is configured.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnconfiguredInstallBackend;
 
@@ -48,12 +186,14 @@ impl InstallBackend for UnconfiguredInstallBackend {
 	}
 }
 
+/// Outcome category for a managed-install resolution attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManagedInstallStatus {
 	CacheHit,
 	Installed { previous_state: CacheState },
 }
 
+/// Result of resolving a managed Knip executable for a workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedInstallOutcome {
 	pub executable_path: PathBuf,
@@ -61,6 +201,7 @@ pub struct ManagedInstallOutcome {
 	pub status: ManagedInstallStatus,
 }
 
+/// High-level managed installer that handles caching, invalidation, and backend execution.
 #[derive(Debug, Clone)]
 pub struct ManagedInstaller<B = UnconfiguredInstallBackend> {
 	cache_root: PathBuf,
@@ -74,6 +215,7 @@ where
 	B: InstallBackend,
 {
 	#[must_use]
+	/// Creates a managed installer rooted at `cache_root`.
 	pub fn new(cache_root: PathBuf, logger: Logger, backend: B) -> Self {
 		Self {
 			cache_root,
@@ -84,11 +226,13 @@ where
 	}
 
 	#[must_use]
+	/// Overrides the managed language-server version requested from the backend.
 	pub fn with_version(mut self, version: impl Into<String>) -> Self {
 		self.version = version.into();
 		self
 	}
 
+	/// Resolves a managed Knip executable, reusing or refreshing the cache as needed.
 	pub fn resolve(
 		&self,
 		cache: &WorktreeCache,
@@ -196,7 +340,7 @@ where
 		let updated_cache = WorktreeCache {
 			worktree_root: cache.worktree_root.clone(),
 			executable_path: Some(executable_path.clone()),
-			package_manager: Some(package_manager_name(package_manager).to_string()),
+			package_manager: Some(package_manager.to_string()),
 			config_path: cache.config_path.clone(),
 			version: Some(request.version),
 			install_source: InstallSource::ManagedCache,
@@ -234,6 +378,7 @@ where
 	}
 
 	#[must_use]
+	/// Returns the cache directory used for the given worktree.
 	pub fn worktree_cache_dir(&self, worktree_root: &Path) -> PathBuf {
 		self.cache_root.join(worktree_cache_key(worktree_root))
 	}
@@ -241,6 +386,7 @@ where
 
 impl ManagedInstaller<UnconfiguredInstallBackend> {
 	#[must_use]
+	/// Creates a managed installer with the placeholder unconfigured backend.
 	pub fn unconfigured(cache_root: PathBuf, logger: Logger) -> Self {
 		Self::new(cache_root, logger, UnconfiguredInstallBackend)
 	}
@@ -318,32 +464,6 @@ fn is_read_only_error(error: &io::Error) -> bool {
 
 fn is_valid_executable(path: &Path) -> bool {
 	path.is_file() && is_executable(path)
-}
-
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-	use std::os::unix::fs::PermissionsExt;
-
-	fs::metadata(path)
-		.map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-		.unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-	path.is_file()
-}
-
-fn package_manager_name(package_manager: PackageManager) -> &'static str {
-	match package_manager {
-		PackageManager::Npm => "npm",
-		PackageManager::Pnpm => "pnpm",
-		PackageManager::Yarn => "yarn",
-		PackageManager::Bun => "bun",
-		PackageManager::Deno => "deno",
-		PackageManager::Vlt => "vlt",
-		PackageManager::Aube => "aube",
-	}
 }
 
 fn worktree_cache_key(worktree_root: &Path) -> String {

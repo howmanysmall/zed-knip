@@ -12,9 +12,6 @@ use zed_knip::reports::{
 	Cycle, CyclesReport, FormatMarkdown, Location, Reference, ReferencesReport, UnusedExport, UnusedExportsReport,
 	UnusedImport, UnusedImportsReport, WorkspaceSummaryReport,
 };
-// ---------------------------------------------------------------------------
-// Shared LSP payload types (minimal, no external deps)
-// ---------------------------------------------------------------------------
 
 type Uri = String;
 
@@ -74,10 +71,6 @@ const KNIP_METHOD_SHOW_REFERENCES: &str = "knip/showReferences";
 const LSP_METHOD_PUBLISH_DIAGNOSTICS: &str = "textDocument/publishDiagnostics";
 const LSP_METHOD_CODE_ACTION: &str = "textDocument/codeAction";
 const LSP_METHOD_HOVER: &str = "textDocument/hover";
-
-// ---------------------------------------------------------------------------
-// Diagnostic parity tests
-// ---------------------------------------------------------------------------
 
 fn sample_unused_export_diagnostic(uri: &str) -> PublishDiagnosticsParams {
 	PublishDiagnosticsParams {
@@ -186,10 +179,6 @@ fn lsp_parity_diagnostics_method_name_is_standard_lsp() {
 	assert_eq!(LSP_METHOD_PUBLISH_DIAGNOSTICS, "textDocument/publishDiagnostics");
 }
 
-// ---------------------------------------------------------------------------
-// Code action parity tests
-// ---------------------------------------------------------------------------
-
 fn sample_remove_export_action() -> CodeAction {
 	CodeAction {
 		title: "Remove export 'myFunction'".to_owned(),
@@ -267,10 +256,6 @@ fn lsp_parity_code_action_delete_file_is_unsupported() {
 	assert_eq!(parity_status, "unsupported");
 }
 
-// ---------------------------------------------------------------------------
-// Custom Knip LSP request parity tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn lsp_parity_custom_method_open_file_name_is_correct() {
 	// knip/openFile: sent by the LS to ask the client to open a file at a
@@ -296,10 +281,6 @@ fn lsp_parity_custom_methods_are_knip_namespaced() {
 		);
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Hover parity tests
-// ---------------------------------------------------------------------------
 
 /// Minimal LSP Hover response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,10 +344,6 @@ fn lsp_parity_hover_show_hover_command_is_zed_equivalent() {
 	assert_eq!(parity_status, "zed-equivalent");
 }
 
-// ---------------------------------------------------------------------------
-// CodeLens limitation tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn lsp_parity_codelens_import_counts_is_zed_equivalent() {
 	// Zed does not support CodeLens (textDocument/codeLens).
@@ -387,10 +364,6 @@ fn lsp_parity_codelens_no_direct_zed_api() {
 
 	assert!(unsupported_lsp_method.contains("codeLens"));
 }
-
-// ---------------------------------------------------------------------------
-// Tree view limitation tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lsp_parity_tree_view_imports_is_zed_equivalent() {
@@ -427,10 +400,6 @@ fn lsp_parity_tree_view_expand_all_command_is_unsupported() {
 	assert!(reason.contains("tree-view"));
 }
 
-// ---------------------------------------------------------------------------
-// Lifecycle parity tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn lsp_parity_lifecycle_ls_startup_is_implemented() {
 	// Standard LSP lifecycle: extension starts the LS process and Zed manages
@@ -454,10 +423,6 @@ fn lsp_parity_lifecycle_file_watching_is_implemented() {
 	assert!(resolver_source.contains("onDidSave"));
 }
 
-// ---------------------------------------------------------------------------
-// MCP exclusion tests
-// ---------------------------------------------------------------------------
-
 #[test]
 fn lsp_parity_mcp_features_are_excluded() {
 	// MCP features (knip-configure, knip-docs, languageModelTools) are
@@ -470,10 +435,6 @@ fn lsp_parity_mcp_features_are_excluded() {
 		assert_eq!(status, "MCP-excluded", "feature '{feature}' must be MCP-excluded");
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Settings parity tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lsp_parity_settings_defer_session_is_implemented() {
@@ -512,10 +473,6 @@ fn lsp_parity_settings_node_runtime_path_is_implemented() {
 	assert_eq!(parity_status, "implemented");
 	assert!(vscode_key.starts_with("knip."));
 }
-
-// ---------------------------------------------------------------------------
-// Diagnostic shape detail tests
-// ---------------------------------------------------------------------------
 
 /// All known Knip diagnostic codes emitted by the language server.
 /// Source: packages/language-server/src/diagnostics.js
@@ -677,10 +634,6 @@ fn lsp_parity_diagnostic_clear_is_empty_diagnostics_array() {
 	);
 }
 
-// ---------------------------------------------------------------------------
-// Code action shape detail tests
-// ---------------------------------------------------------------------------
-
 /// Known Knip code action kind prefixes.
 const KNIP_CODE_ACTION_KIND_PREFIX: &str = "quickfix.knip.";
 
@@ -751,10 +704,6 @@ fn lsp_parity_code_action_method_returns_list_not_single_item() {
 
 	assert!(actions.len() > 1, "codeAction response is a list");
 }
-
-// ---------------------------------------------------------------------------
-// Hover shape detail tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lsp_parity_hover_contents_is_markdown_string() {
@@ -831,10 +780,6 @@ fn lsp_parity_hover_unused_symbol_shows_zero_usages() {
 	);
 	assert!(hover.range.is_some());
 }
-
-// ---------------------------------------------------------------------------
-// Parity matrix completeness test
-// ---------------------------------------------------------------------------
 
 /// All parity statuses used in the matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -956,10 +901,6 @@ fn lsp_parity_matrix_mcp_excluded_count_matches_expected() {
 
 	assert_eq!(mcp, 3, "expected 3 MCP-excluded features");
 }
-
-// ---------------------------------------------------------------------------
-// Tree view → markdown report output format tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lsp_parity_tree_view_exports_report_markdown_has_table_and_heading() {
@@ -1092,10 +1033,6 @@ fn lsp_parity_tree_view_references_report_lists_locations() {
 	);
 	assert!(md.contains("2 found"), "references report must show count");
 }
-
-// ---------------------------------------------------------------------------
-// CodeLens → slash-command output format tests
-// ---------------------------------------------------------------------------
 
 #[test]
 fn lsp_parity_codelens_workspace_summary_report_is_knip_report_surface() {

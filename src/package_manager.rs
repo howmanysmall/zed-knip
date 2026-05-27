@@ -1,4 +1,5 @@
-use std::{fmt, fs, path::Path};
+use std::{fmt, fs, path::Path, str::FromStr};
+use zed_extension_api::serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackageManager {
@@ -47,6 +48,38 @@ impl fmt::Display for PackageManagerError {
 
 impl std::error::Error for PackageManagerError {}
 
+impl fmt::Display for PackageManager {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Npm => f.write_str("npm"),
+			Self::Pnpm => f.write_str("pnpm"),
+			Self::Yarn => f.write_str("yarn"),
+			Self::Bun => f.write_str("bun"),
+			Self::Deno => f.write_str("deno"),
+			Self::Vlt => f.write_str("vlt"),
+			Self::Aube => f.write_str("aube"),
+		}
+	}
+}
+
+pub fn parse(name: &str) -> Result<PackageManager, PackageManagerError> {
+	let name = name.trim();
+	let manager = name.split_once('@').map(|(value, _)| value).unwrap_or(name);
+
+	match manager {
+		"npm" => Ok(PackageManager::Npm),
+		"pnpm" => Ok(PackageManager::Pnpm),
+		"yarn" => Ok(PackageManager::Yarn),
+		"bun" => Ok(PackageManager::Bun),
+		"deno" => Ok(PackageManager::Deno),
+		"vlt" => Ok(PackageManager::Vlt),
+		"aube" => Ok(PackageManager::Aube),
+		_ => Err(PackageManagerError::UnsupportedPackageManager {
+			found: name.to_string(),
+		}),
+	}
+}
+
 pub fn detect(workspace_root: &Path) -> Result<PackageManager, PackageManagerError> {
 	let package_json = fs::read_to_string(workspace_root.join("package.json")).ok();
 	detect_from_workspace_files(package_json.as_deref(), |lockfile| {
@@ -82,33 +115,12 @@ pub fn detect_from_workspace_files(
 
 fn detect_from_package_json_contents(contents: &str) -> Option<Result<PackageManager, PackageManagerError>> {
 	let manager = extract_package_manager_field(contents)?;
-	Some(parse_package_manager(&manager))
+	Some(parse(&manager))
 }
 
 fn extract_package_manager_field(contents: &str) -> Option<String> {
-	let key = "\"packageManager\"";
-	let start = contents.find(key)? + key.len();
-	let after_key = contents[start..].find(':')? + start + 1;
-	let value = contents[after_key..].trim_start();
-	let value = value.strip_prefix('"')?;
-	let end = value.find('"')?;
-	Some(value[..end].to_string())
-}
-
-fn parse_package_manager(value: &str) -> Result<PackageManager, PackageManagerError> {
-	let manager = value.split_once('@').map(|(name, _)| name).unwrap_or(value);
-	match manager {
-		"npm" => Ok(PackageManager::Npm),
-		"pnpm" => Ok(PackageManager::Pnpm),
-		"yarn" => Ok(PackageManager::Yarn),
-		"bun" => Ok(PackageManager::Bun),
-		"deno" => Ok(PackageManager::Deno),
-		"vlt" => Ok(PackageManager::Vlt),
-		"aube" => Ok(PackageManager::Aube),
-		_ => Err(PackageManagerError::UnsupportedPackageManager {
-			found: value.to_string(),
-		}),
-	}
+	let value = Value::from_str(contents).ok()?;
+	value.get("packageManager").and_then(Value::as_str).map(str::to_string)
 }
 
 fn lockfile_to_manager(lockfile: &str) -> Option<PackageManager> {
@@ -225,6 +237,28 @@ mod tests {
 		let manager = detect(&workspace.root).unwrap();
 
 		assert_eq!(manager, PackageManager::Aube);
+	}
+
+	#[test]
+	fn package_manager_invalid_package_json_falls_back_to_lockfile() {
+		let workspace = TempWorkspace::new("invalid-package-json");
+		workspace.write("package.json", r#"{"packageManager":"pnpm@9.0.0""#);
+		workspace.write("bun.lock", "");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Bun);
+	}
+
+	#[test]
+	fn package_manager_non_string_package_manager_field_falls_back_to_lockfile() {
+		let workspace = TempWorkspace::new("non-string-package-manager");
+		workspace.write("package.json", r#"{"packageManager":{"name":"pnpm"}}"#);
+		workspace.write("yarn.lock", "");
+
+		let manager = detect(&workspace.root).unwrap();
+
+		assert_eq!(manager, PackageManager::Yarn);
 	}
 
 	#[test]

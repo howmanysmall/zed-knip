@@ -3,7 +3,7 @@
 // Each test exercises a distinct failure scenario using real fixtures from
 // `tests/fixtures/` and the production error types from `src/errors.rs`.
 // No actual network calls are made; network failures are simulated via the
-// `ManagedInstall` mock seam in `src/resolver.rs`.
+// `ManagedInstall` mock seam in `src/managed_install.rs`.
 //
 // Run with:
 //   mise x -- cargo nextest run -E 'test(failure)'
@@ -19,10 +19,6 @@ mod fixtures {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Shared test helpers
-// ---------------------------------------------------------------------------
-
 use std::{
 	fs,
 	path::{Path, PathBuf},
@@ -32,8 +28,9 @@ use std::{
 use zed_knip::{
 	cache::{InstallSource, WorktreeCache},
 	errors::KnipError,
+	managed_install::{ManagedInstall, ManagedInstallDisabled},
 	package_manager::PackageManager,
-	resolver::{resolve_knip, ManagedInstall, ManagedInstallDisabled},
+	resolver::resolve_knip,
 	settings::KnipSettings,
 };
 
@@ -110,10 +107,6 @@ fn failing_install(error: KnipError) -> MockInstall {
 	MockInstall { result: Err(error) }
 }
 
-// ---------------------------------------------------------------------------
-// 1. Missing Knip binary
-// ---------------------------------------------------------------------------
-
 /// When no Knip binary exists in the workspace and auto-install is disabled,
 /// the resolver must return `MissingKnip` with the workspace root path.
 #[test]
@@ -166,10 +159,6 @@ fn failure_missing_knip_error_message_contains_workspace_root() {
 	);
 }
 
-// ---------------------------------------------------------------------------
-// 2. Invalid Knip config
-// ---------------------------------------------------------------------------
-
 /// When the user points to an invalid config file via settings, the resolver
 /// must surface `InvalidConfig` with the config path.
 #[test]
@@ -218,10 +207,6 @@ fn failure_invalid_config_fixture_path_is_named_in_error() {
 		"message must include reason: {message}"
 	);
 }
-
-// ---------------------------------------------------------------------------
-// 3. Corrupt cache
-// ---------------------------------------------------------------------------
 
 /// `WorktreeCache::mark_corrupt` must produce a `CorruptCache` error whose
 /// message contains the cache path and instructs the user to delete it.
@@ -282,10 +267,6 @@ fn failure_corrupt_cache_detail_appears_in_message() {
 	);
 }
 
-// ---------------------------------------------------------------------------
-// 4. Read-only cache
-// ---------------------------------------------------------------------------
-
 /// `WorktreeCache::mark_read_only` must produce a `ReadOnlyCache` error whose
 /// message contains the path and tells the user to make it writable.
 #[test]
@@ -325,10 +306,6 @@ fn failure_read_only_cache_path_with_spaces_preserved_in_message() {
 		"path with spaces must appear verbatim in error; got: {message}"
 	);
 }
-
-// ---------------------------------------------------------------------------
-// 5. Language server crash
-// ---------------------------------------------------------------------------
 
 /// A crash with a known exit code must name the code in the error message.
 #[test]
@@ -377,10 +354,6 @@ fn failure_language_server_crash_exit_code_one_is_distinct_from_none() {
 		"message with code must contain '1'; got: {with_code}"
 	);
 }
-
-// ---------------------------------------------------------------------------
-// 6. Offline / network failure
-// ---------------------------------------------------------------------------
 
 /// When the managed installer fails with `NetworkUnavailable`, the resolver
 /// must surface that error unchanged so the user sees the network detail.
@@ -431,10 +404,6 @@ fn failure_offline_generic_detail_is_preserved() {
 		"error must contain 'offline'; got: {message}"
 	);
 }
-
-// ---------------------------------------------------------------------------
-// 7. Ambiguous package manager
-// ---------------------------------------------------------------------------
 
 /// The `multiple-lockfiles` fixture has both `package-lock.json` and
 /// `yarn.lock`. Detection must return `AmbiguousPackageManager` listing both.
@@ -511,10 +480,6 @@ fn failure_ambiguous_package_manager_resolved_by_settings_override() {
 
 	assert_eq!(resolved.package_manager, PackageManager::Npm);
 }
-
-// ---------------------------------------------------------------------------
-// Error display completeness
-// ---------------------------------------------------------------------------
 
 /// Every `KnipError` variant must produce a non-empty, non-whitespace message.
 #[test]

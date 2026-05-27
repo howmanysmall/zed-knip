@@ -1,81 +1,5 @@
 use std::{fmt, path::PathBuf};
 
-#[cfg(test)]
-mod tests {
-	use super::KnipError;
-	use std::path::PathBuf;
-
-	#[test]
-	fn error_missing_knip_display_mentions_workspace_install_path_and_managed_install() {
-		let error = KnipError::MissingKnip {
-			workspace_root: PathBuf::from("/workspace"),
-		};
-
-		assert_eq!(
-			error.to_string(),
-			"Knip is not installed for workspace /workspace. Install Knip in the workspace, set the explicit Knip path in settings, or enable the managed install option."
-		);
-	}
-
-	#[test]
-	fn error_missing_knip_invalid_explicit_path_display() {
-		let error = KnipError::InvalidExplicitPath {
-			path: PathBuf::from("/workspace/bin/knip"),
-		};
-
-		assert_eq!(
-			error.to_string(),
-			"The configured Knip path /workspace/bin/knip is invalid. Update the explicit path setting to a valid Knip executable."
-		);
-	}
-
-	#[test]
-	fn error_missing_knip_failed_managed_install_display() {
-		let error = KnipError::FailedManagedInstall {
-			reason: "download timed out".to_string(),
-		};
-
-		assert_eq!(
-			error.to_string(),
-			"Managed Knip install failed: download timed out. Fix the error above, then retry the managed install."
-		);
-	}
-
-	#[test]
-	fn error_missing_knip_network_unavailable_display() {
-		let error = KnipError::NetworkUnavailable {
-			detail: "proxy denied the request".to_string(),
-		};
-
-		assert_eq!(
-			error.to_string(),
-			"Knip could not be downloaded because the network is unavailable: proxy denied the request. Check your connection, proxy, or offline mode, then retry."
-		);
-	}
-
-	#[test]
-	fn error_missing_knip_read_only_cache_display() {
-		let error = KnipError::ReadOnlyCache {
-			path: PathBuf::from("/workspace/.cache/knip"),
-		};
-
-		assert_eq!(
-			error.to_string(),
-			"Cannot write to the Knip cache at /workspace/.cache/knip. Make the cache directory writable or move the cache to a writable location."
-		);
-	}
-
-	#[test]
-	fn error_missing_knip_language_server_crash_display() {
-		let error = KnipError::LanguageServerCrash { exit_code: Some(137) };
-
-		assert_eq!(
-			error.to_string(),
-			"Knip language server crashed with exit code 137. Restart the language server or reload the workspace after fixing the crash."
-		);
-	}
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnipError {
 	MissingKnip { workspace_root: PathBuf },
@@ -161,3 +85,79 @@ impl fmt::Display for KnipError {
 }
 
 impl std::error::Error for KnipError {}
+
+#[cfg(test)]
+mod tests {
+	use super::KnipError;
+	use std::path::PathBuf;
+
+	#[test]
+	fn error_missing_knip_display_mentions_workspace_install_path_and_managed_install() {
+		let error = KnipError::MissingKnip {
+			workspace_root: PathBuf::from("/workspace"),
+		};
+
+		assert_eq!(
+			error.to_string(),
+			"Knip is not installed for workspace /workspace. Install Knip in the workspace, set the explicit Knip path in settings, or enable the managed install option."
+		);
+	}
+
+	#[test]
+	fn error_missing_knip_invalid_explicit_path_display() {
+		let error = KnipError::InvalidExplicitPath {
+			path: PathBuf::from("/workspace/bin/knip"),
+		};
+
+		assert_eq!(
+			error.to_string(),
+			"The configured Knip path /workspace/bin/knip is invalid. Update the explicit path setting to a valid Knip executable."
+		);
+	}
+
+	#[test]
+	fn error_missing_knip_failed_managed_install_display() {
+		let error = KnipError::FailedManagedInstall {
+			reason: "download timed out".to_string(),
+		};
+
+		assert_eq!(
+			error.to_string(),
+			"Managed Knip install failed: download timed out. Fix the error above, then retry the managed install."
+		);
+	}
+
+	#[test]
+	fn error_missing_knip_network_unavailable_display() {
+		let error = KnipError::NetworkUnavailable {
+			detail: "proxy denied the request".to_string(),
+		};
+
+		assert_eq!(
+			error.to_string(),
+			"Knip could not be downloaded because the network is unavailable: proxy denied the request. Check your connection, proxy, or offline mode, then retry."
+		);
+	}
+
+	#[test]
+	fn error_missing_knip_read_only_cache_display() {
+		let error = KnipError::ReadOnlyCache {
+			path: PathBuf::from("/workspace/.cache/knip"),
+		};
+
+		assert_eq!(
+			error.to_string(),
+			"Cannot write to the Knip cache at /workspace/.cache/knip. Make the cache directory writable or move the cache to a writable location."
+		);
+	}
+
+	#[test]
+	fn error_missing_knip_language_server_crash_display() {
+		let error = KnipError::LanguageServerCrash { exit_code: Some(137) };
+
+		assert_eq!(
+			error.to_string(),
+			"Knip language server crashed with exit code 137. Restart the language server or reload the workspace after fixing the crash."
+		);
+	}
+}

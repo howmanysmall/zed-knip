@@ -59,7 +59,7 @@ impl WorktreeCache {
 	}
 
 	pub fn check_validity(&self, current: &InvalidationInputs) -> CacheState {
-		if self.executable_path.is_none() || self.package_manager.is_none() || self.config_path.is_none() {
+		if self.executable_path.is_none() || self.package_manager.is_none() {
 			return CacheState::Miss;
 		}
 
@@ -130,6 +130,15 @@ mod tests {
 		}
 
 		#[test]
+		fn cache_hit_when_no_config_is_tracked() {
+			let mut cache = valid_cache();
+			cache.config_path = None;
+			cache.invalidation_inputs.knip_config_mtime = None;
+
+			assert_eq!(cache.check_validity(&cache.invalidation_inputs), CacheState::Hit);
+		}
+
+		#[test]
 		fn cache_miss_when_entry_incomplete() {
 			let mut cache = valid_cache();
 			cache.executable_path = None;
@@ -154,6 +163,33 @@ mod tests {
 			let cache = valid_cache();
 			let mut current = cache.invalidation_inputs;
 			current.knip_config_mtime = Some(time(31));
+
+			assert_eq!(
+				cache.check_validity(&current),
+				CacheState::Stale(StaleReason::ConfigChanged)
+			);
+		}
+
+		#[test]
+		fn cache_stale_when_config_appears() {
+			let mut cache = valid_cache();
+			cache.config_path = None;
+			cache.invalidation_inputs.knip_config_mtime = None;
+
+			let mut current = cache.invalidation_inputs;
+			current.knip_config_mtime = Some(time(30));
+
+			assert_eq!(
+				cache.check_validity(&current),
+				CacheState::Stale(StaleReason::ConfigChanged)
+			);
+		}
+
+		#[test]
+		fn cache_stale_when_config_disappears() {
+			let cache = valid_cache();
+			let mut current = cache.invalidation_inputs;
+			current.knip_config_mtime = None;
 
 			assert_eq!(
 				cache.check_validity(&current),
