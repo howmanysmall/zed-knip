@@ -1,24 +1,18 @@
 # Zed Knip
 
-Zed extension for [Knip](https://knip.dev/), the project linter for unused files, dependencies, and exports in JavaScript and TypeScript projects.
+This Zed extension wraps [Knip](https://knip.dev/) - the linter that spots unused files, dependencies, and exports in JS/TS projects.
 
-## Overview
+## What it does
 
-Zed Knip integrates the Knip language server into Zed, providing real-time feedback on unused code and dependencies directly in your editor.
+Zed Knip runs the Knip language server in the background, flagging unused code and dependencies as you work.
 
 ## Features
 
-- **Diagnostics**: Real-time warnings for unused files, unused dependencies, unused exports, and circular dependencies.
-- **Code Actions**: Quick fixes to remove unused exports or dependencies, and the ability to mark exports as intentional via JSDoc tags.
-- **Hover Support**: View usage counts for exports and dependencies by hovering over them.
-- **Managed Installation**: Automatically downloads and manages the Knip language server if it's not found in your workspace.
-- **Package Manager Detection**: Supports npm, pnpm, yarn, and bun out of the box.
-- **Slash Commands**:
-  - `/knip-report`: Generates a summary of all issues in the workspace.
-  - `/knip-imports`: Lists unused import counts.
-  - `/knip-exports`: Lists unused export counts.
-  - `/knip-start`: Manually starts the Knip session.
-  - `/knip-restart`: Restarts the Knip session.
+- **Diagnostics**: See warnings for unused files, dependencies, exports, and circular dependencies right in your editor.
+- **Code Actions**: Quick fixes to ditch unused exports or dependencies, plus a way to mark exports as intentional with JSDoc tags.
+- **Hover Support**: Hover over exports or dependencies to see how many times they're used.
+- **Managed Installation**: The extension grabs and manages the Knip language server for you if it's missing from your workspace.
+- **Package Manager Detection**: Works with npm, pnpm, yarn, or bun without any extra config.
 
 ## Installation
 
