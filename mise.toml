@@ -41,14 +41,6 @@ la = "aube run lint"
 tc = "aube run type-check"
 pc = "./scripts/pre-commit.sh"
 
-[tasks.lockfile]
-description = "Regenerate lockfile checksums for all tools, then install"
-run = ["mise lock", "mise install"]
-
-[tasks.lockfile-tool]
-description = "Regenerate lockfile checksums for a specific tool, then install"
-run = ["mise lock {{arg(name='tool')}}", "mise install"]
-
 [tasks.test-all]
 description = "Run the full test suite (unit + integration + all targets + all features)"
 run = "cargo nextest run --all-targets --all-features"

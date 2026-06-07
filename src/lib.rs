@@ -334,14 +334,6 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 	{
 		overrides.require_config = require_config;
 	}
-	if let Some(extra_args) = settings.get("extra_args").and_then(zed::serde_json::Value::as_array) {
-		overrides.extra_args = extra_args
-			.iter()
-			.filter_map(zed::serde_json::Value::as_str)
-			.map(str::to_string)
-			.collect();
-	}
-
 	Ok(())
 }
 
@@ -478,7 +470,6 @@ mod tests {
 				"package_manager": "pnpm",
 				"auto_install": false,
 				"log_level": "warn",
-				"extra_args": ["--from-settings"],
 				"config_path": "knip.ts",
 				"require_config": true
 			})),
@@ -492,7 +483,7 @@ mod tests {
 				package_manager: Some("pnpm".to_string()),
 				auto_install: false,
 				log_level: LogLevel::Warn,
-				extra_args: vec!["--from-settings".to_string()],
+				extra_args: vec!["--from-binary".to_string()],
 				config_path: Some("knip.ts".to_string()),
 				require_config: true,
 			}
