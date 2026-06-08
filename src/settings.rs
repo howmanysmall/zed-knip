@@ -1,4 +1,87 @@
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, path::Path, str::FromStr};
+
+/// Valid Knip issue types for diagnostics filtering.
+pub const VALID_ISSUE_TYPES: &[&str] = &[
+	"files",
+	"dependencies",
+	"devDependencies",
+	"optionalPeerDependencies",
+	"unlisted",
+	"binaries",
+	"unresolved",
+	"exports",
+	"types",
+	"nsExports",
+	"nsTypes",
+	"duplicates",
+	"enumMembers",
+	"namespaceMembers",
+	"catalog",
+];
+
+/// Diagnostic severity level for a Knip issue type override.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+	Error,
+	Warning,
+	Information,
+	Hint,
+	Off,
+}
+
+impl DiagnosticSeverity {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Error => "error",
+			Self::Warning => "warn",
+			Self::Information => "info",
+			Self::Hint => "hint",
+			Self::Off => "off",
+		}
+	}
+
+	/// Parse a severity string with issue-type context for error messages.
+	pub(crate) fn parse_with_type(issue_type: &str, value: &str) -> Result<Self, KnipSettingsError> {
+		match value.trim().to_ascii_lowercase().as_str() {
+			"error" => Ok(Self::Error),
+			"warn" | "warning" => Ok(Self::Warning),
+			"info" | "information" => Ok(Self::Information),
+			"hint" => Ok(Self::Hint),
+			"off" => Ok(Self::Off),
+			_ => Err(KnipSettingsError::InvalidSeverityValue {
+				issue_type: issue_type.to_owned(),
+				value: value.to_owned(),
+			}),
+		}
+	}
+}
+
+impl fmt::Display for DiagnosticSeverity {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
+}
+
+impl FromStr for DiagnosticSeverity {
+	type Err = KnipSettingsError;
+
+	fn from_str(input: &str) -> Result<Self, Self::Err> {
+		Self::parse_with_type("", input)
+	}
+}
+
+/// Diagnostics filter and severity override configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KnipDiagnosticsSettings {
+	/// Allowlist of issue types to show (empty = show all).
+	pub include_issue_types: Vec<String>,
+	/// Blocklist of issue types to hide.
+	pub exclude_issue_types: Vec<String>,
+	/// Hide diagnostics for files under these relative path prefixes.
+	pub exclude_path_prefixes: Vec<String>,
+	/// Override severity for specific issue types.
+	pub severity_by_issue_type: BTreeMap<String, DiagnosticSeverity>,
+}
 
 /// User-facing Knip settings for the Zed extension.
 ///
@@ -9,19 +92,11 @@ pub struct KnipSettings {
 	/// Explicit path to the Knip language server binary.
 	///
 	/// Default: `None`.
-	pub server_path: Option<String>,
-	/// Override for the detected package manager.
-	///
-	/// Default: `None`.
-	pub package_manager: Option<String>,
+	pub binary_path: Option<String>,
 	/// Enable managed installation of Knip.
 	///
 	/// Default: `true`.
 	pub auto_install: bool,
-	/// Log verbosity for the Knip language server.
-	///
-	/// Default: [`LogLevel::Info`].
-	pub log_level: LogLevel,
 	/// Explicit Knip config path.
 	///
 	/// Default: `None`.
@@ -30,17 +105,37 @@ pub struct KnipSettings {
 	///
 	/// Default: `false`.
 	pub require_config: bool,
+	/// Path to the TypeScript config file for Knip analysis.
+	///
+	/// Default: `None`.
+	pub ts_config_path: Option<String>,
+	/// Diagnostics filter and severity configuration.
+	///
+	/// Default: all defaults (show all, no overrides).
+	pub diagnostics: KnipDiagnosticsSettings,
+	/// Internal: detected or overridden package manager for the workspace.
+	///
+	/// Not user-configurable via settings JSON.
+	/// Kept for resolver compatibility until Task 3.
+	pub package_manager: Option<String>,
+	/// Internal: log level for the language server.
+	///
+	/// Not user-configurable via settings JSON.
+	/// Kept for resolver compatibility until Task 3.
+	pub log_level: LogLevel,
 }
 
 impl Default for KnipSettings {
 	fn default() -> Self {
 		Self {
-			server_path: None,
-			package_manager: None,
+			binary_path: None,
 			auto_install: true,
-			log_level: LogLevel::Info,
 			config_path: None,
 			require_config: false,
+			ts_config_path: None,
+			diagnostics: KnipDiagnosticsSettings::default(),
+			package_manager: None,
+			log_level: LogLevel::Info,
 		}
 	}
 }
@@ -51,23 +146,75 @@ impl KnipSettings {
 	/// `Option` fields keep the base value when the override is `None`.
 	pub fn merge(self, overrides: Self) -> Self {
 		Self {
-			server_path: overrides.server_path.or(self.server_path),
-			package_manager: overrides.package_manager.or(self.package_manager),
+			binary_path: overrides.binary_path.or(self.binary_path),
 			auto_install: overrides.auto_install,
-			log_level: overrides.log_level,
 			config_path: overrides.config_path.or(self.config_path),
 			require_config: overrides.require_config,
+			ts_config_path: overrides.ts_config_path.or(self.ts_config_path),
+			diagnostics: overrides.diagnostics,
+			package_manager: overrides.package_manager.or(self.package_manager),
+			log_level: overrides.log_level,
 		}
+	}
+
+	/// Returns `true` if these settings require the managed-install patch to take effect.
+	///
+	/// The patch is needed whenever advanced editor settings are present that the vanilla
+	/// language server does not support natively.
+	pub fn requires_managed_patch(&self) -> bool {
+		self.ts_config_path.is_some() || !self.diagnostics_is_default()
+	}
+
+	/// Returns `true` if all diagnostics sub-fields are at their defaults (all empty).
+	pub fn diagnostics_is_default(&self) -> bool {
+		self.diagnostics.include_issue_types.is_empty()
+			&& self.diagnostics.exclude_issue_types.is_empty()
+			&& self.diagnostics.exclude_path_prefixes.is_empty()
+			&& self.diagnostics.severity_by_issue_type.is_empty()
 	}
 
 	/// Validate user-provided settings values.
 	pub fn validate(&self) -> Result<(), KnipSettingsError> {
-		if matches!(self.server_path.as_deref(), Some("")) {
-			return Err(KnipSettingsError::EmptyServerPath);
+		if matches!(self.binary_path.as_deref(), Some("")) {
+			return Err(KnipSettingsError::EmptyBinaryPath);
 		}
 
 		if matches!(self.config_path.as_deref(), Some("")) {
 			return Err(KnipSettingsError::EmptyConfigPath);
+		}
+
+		// Validate issue types in include/exclude lists and severity map keys.
+		for issue_type in self
+			.diagnostics
+			.include_issue_types
+			.iter()
+			.chain(self.diagnostics.exclude_issue_types.iter())
+			.chain(self.diagnostics.severity_by_issue_type.keys())
+		{
+			if !VALID_ISSUE_TYPES.contains(&issue_type.as_str()) {
+				return Err(KnipSettingsError::InvalidIssueType {
+					issue_type: issue_type.clone(),
+				});
+			}
+		}
+
+		// Validate diagnostics path prefixes.
+		for prefix in &self.diagnostics.exclude_path_prefixes {
+			if prefix.is_empty() {
+				return Err(KnipSettingsError::InvalidPathPrefix {
+					reason: "path prefix cannot be empty".to_string(),
+				});
+			}
+			if Path::new(prefix).is_absolute() {
+				return Err(KnipSettingsError::InvalidPathPrefix {
+					reason: format!("path prefix '{prefix}' must be relative, not absolute"),
+				});
+			}
+			if prefix.contains("..") {
+				return Err(KnipSettingsError::InvalidPathPrefix {
+					reason: format!("path prefix '{prefix}' must not contain '..' traversal"),
+				});
+			}
 		}
 
 		Ok(())
@@ -75,6 +222,8 @@ impl KnipSettings {
 }
 
 /// Knip language-server log levels.
+///
+/// Kept for internal resolver compatibility until Task 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
 	Trace,
@@ -85,7 +234,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-	fn as_str(self) -> &'static str {
+	pub(crate) fn as_str(self) -> &'static str {
 		match self {
 			Self::Trace => "trace",
 			Self::Debug => "debug",
@@ -121,23 +270,53 @@ impl FromStr for LogLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnipSettingsError {
 	/// The explicit Knip binary path was set to an empty string.
-	EmptyServerPath,
+	EmptyBinaryPath,
 	/// The explicit Knip config path was set to an empty string.
 	EmptyConfigPath,
 	/// The requested log level could not be parsed.
 	InvalidLogLevel(String),
+	/// A removed setting was used; names the setting and its replacement.
+	RemovedSetting {
+		name: &'static str,
+		replacement: &'static str,
+	},
+	/// An invalid Knip issue type was used in diagnostics configuration.
+	InvalidIssueType { issue_type: String },
+	/// An invalid severity value was used for a diagnostics override.
+	InvalidSeverityValue { issue_type: String, value: String },
+	/// An invalid diagnostics path prefix was provided.
+	InvalidPathPrefix { reason: String },
 }
 
 impl fmt::Display for KnipSettingsError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::EmptyServerPath => write!(f, "The Knip server path cannot be empty."),
+			Self::EmptyBinaryPath => write!(f, "The Knip binary path cannot be empty."),
 			Self::EmptyConfigPath => write!(f, "The Knip config path cannot be empty."),
 			Self::InvalidLogLevel(level) => {
 				write!(
 					f,
 					"Invalid Knip log level '{level}'. Use trace, debug, info, warn, or error."
 				)
+			}
+			Self::RemovedSetting { name, replacement } => {
+				write!(f, "Removed setting '{name}'. Use '{replacement}' instead.")
+			}
+			Self::InvalidIssueType { issue_type } => {
+				write!(
+					f,
+					"Invalid Knip issue type '{issue_type}'. Use one of: {}.",
+					VALID_ISSUE_TYPES.join(", ")
+				)
+			}
+			Self::InvalidSeverityValue { issue_type, value } => {
+				write!(
+					f,
+					"Invalid severity '{value}' for issue type '{issue_type}'. Use error, warn, info, hint, or off."
+				)
+			}
+			Self::InvalidPathPrefix { reason } => {
+				write!(f, "Invalid diagnostic path prefix: {reason}")
 			}
 		}
 	}
@@ -147,7 +326,7 @@ impl std::error::Error for KnipSettingsError {}
 
 #[cfg(test)]
 mod tests {
-	use super::{KnipSettings, KnipSettingsError, LogLevel};
+	use super::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError, LogLevel};
 	use std::str::FromStr;
 
 	#[test]
@@ -157,12 +336,14 @@ mod tests {
 		assert_eq!(
 			settings,
 			KnipSettings {
-				server_path: None,
-				package_manager: None,
+				binary_path: None,
 				auto_install: true,
 				log_level: LogLevel::Info,
 				config_path: None,
 				require_config: false,
+				ts_config_path: None,
+				diagnostics: KnipDiagnosticsSettings::default(),
+				package_manager: None,
 			}
 		);
 	}
@@ -178,13 +359,13 @@ mod tests {
 	}
 
 	#[test]
-	fn settings_invalid_empty_server_path() {
+	fn settings_invalid_empty_binary_path() {
 		let settings = KnipSettings {
-			server_path: Some(String::new()),
+			binary_path: Some(String::new()),
 			..KnipSettings::default()
 		};
 
-		assert_eq!(settings.validate(), Err(KnipSettingsError::EmptyServerPath));
+		assert_eq!(settings.validate(), Err(KnipSettingsError::EmptyBinaryPath));
 	}
 
 	#[test]
@@ -203,5 +384,141 @@ mod tests {
 			LogLevel::from_str("garbage"),
 			Err(KnipSettingsError::InvalidLogLevel("garbage".to_string()))
 		);
+	}
+
+	#[test]
+	fn settings_accept_supported_editor_workflow_settings() {
+		let settings = KnipSettings {
+			binary_path: Some("/usr/local/bin/knip-language-server".to_string()),
+			auto_install: false,
+			config_path: Some("knip.config.ts".to_string()),
+			require_config: true,
+			ts_config_path: Some("tsconfig.app.json".to_string()),
+			diagnostics: KnipDiagnosticsSettings {
+				include_issue_types: vec!["exports".to_string(), "types".to_string()],
+				exclude_issue_types: vec!["files".to_string()],
+				exclude_path_prefixes: vec!["src/generated/".to_string()],
+				severity_by_issue_type: [("dependencies".to_string(), DiagnosticSeverity::Warning)]
+					.into_iter()
+					.collect(),
+			},
+			..KnipSettings::default()
+		};
+
+		assert!(settings.validate().is_ok());
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn settings_requires_managed_patch_true_for_ts_config_path() {
+		let settings = KnipSettings {
+			ts_config_path: Some("tsconfig.app.json".to_string()),
+			..KnipSettings::default()
+		};
+
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn settings_requires_managed_patch_true_for_non_default_diagnostics() {
+		let settings = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				include_issue_types: vec!["exports".to_string()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn settings_requires_managed_patch_false_for_baseline() {
+		assert!(!KnipSettings::default().requires_managed_patch());
+	}
+
+	#[test]
+	fn settings_reject_invalid_diagnostics_filters() {
+		// Invalid issue type in include list.
+		let bad_include = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				include_issue_types: vec!["not_a_real_type".to_string()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+		assert!(
+			matches!(bad_include.validate(), Err(KnipSettingsError::InvalidIssueType { .. })),
+			"expected InvalidIssueType for unknown include_issue_types entry"
+		);
+
+		// Invalid issue type in exclude list.
+		let bad_exclude = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				exclude_issue_types: vec!["badType".to_string()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			bad_exclude.validate(),
+			Err(KnipSettingsError::InvalidIssueType { .. })
+		));
+
+		// Invalid severity string via FromStr.
+		assert!(
+			matches!(
+				DiagnosticSeverity::from_str("offX"),
+				Err(KnipSettingsError::InvalidSeverityValue { .. })
+			),
+			"expected InvalidSeverityValue for unrecognised severity string"
+		);
+
+		// Invalid severity with issue type context via parse_with_type.
+		let err = DiagnosticSeverity::parse_with_type("exports", "offX").unwrap_err();
+		assert!(
+			matches!(&err, KnipSettingsError::InvalidSeverityValue { issue_type, value }
+				if issue_type == "exports" && value == "offX"),
+			"parse_with_type must populate issue_type, got: {err}"
+		);
+
+		// Empty path prefix.
+		let empty_prefix = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				exclude_path_prefixes: vec![String::new()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			empty_prefix.validate(),
+			Err(KnipSettingsError::InvalidPathPrefix { .. })
+		));
+
+		// Absolute path prefix.
+		let abs_prefix = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				exclude_path_prefixes: vec!["/absolute/path".to_string()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			abs_prefix.validate(),
+			Err(KnipSettingsError::InvalidPathPrefix { .. })
+		));
+
+		// Path prefix containing "..".
+		let dotdot_prefix = KnipSettings {
+			diagnostics: KnipDiagnosticsSettings {
+				exclude_path_prefixes: vec!["../up".to_string()],
+				..KnipDiagnosticsSettings::default()
+			},
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			dotdot_prefix.validate(),
+			Err(KnipSettingsError::InvalidPathPrefix { .. })
+		));
 	}
 }

@@ -15,7 +15,7 @@ use crate::{
 	managed_install::ZedNpmManagedInstall,
 	package_manager::PackageManagerError,
 	resolver::{build_language_server_command, resolve_knip},
-	settings::{KnipSettings, LogLevel},
+	settings::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError},
 };
 use std::path::PathBuf;
 use zed_extension_api as zed;
@@ -210,7 +210,32 @@ fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Val
 		config["configFilePath"] = zed::serde_json::Value::String(config_path.to_string());
 	}
 
+	if settings.requires_managed_patch() {
+		let mut zed_knip = zed::serde_json::json!({
+			"diagnostics": build_diagnostics_json(&settings.diagnostics)
+		});
+		if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
+			zed_knip["tsConfigFilePath"] = zed::serde_json::Value::String(ts_config_path.to_string());
+		}
+		config["zedKnip"] = zed_knip;
+	}
+
 	config
+}
+
+fn build_diagnostics_json(diag: &KnipDiagnosticsSettings) -> zed::serde_json::Value {
+	let severity_map: std::collections::BTreeMap<String, String> = diag
+		.severity_by_issue_type
+		.iter()
+		.map(|(k, v)| (k.clone(), v.to_string()))
+		.collect();
+
+	zed::serde_json::json!({
+		"includeIssueTypes": diag.include_issue_types,
+		"excludeIssueTypes": diag.exclude_issue_types,
+		"excludePathPrefixes": diag.exclude_path_prefixes,
+		"severityByIssueType": severity_map
+	})
 }
 
 fn settings_for_worktree(
@@ -276,16 +301,12 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 	let mut overrides = KnipSettings::default();
 
 	if let Some(binary) = settings.binary {
-		overrides.server_path = binary.path;
+		overrides.binary_path = binary.path;
 		if let Some(arguments) = binary.arguments {
 			reject_binary_arguments(&arguments)?;
 		}
-		if let Some(env) = binary.env {
-			overrides.package_manager = env.get("KNIP_PACKAGE_MANAGER").cloned();
-			if let Some(log_level) = env.get("KNIP_LOG_LEVEL") {
-				overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
-			}
-		}
+		// binary.env is intentionally not parsed: KNIP_LOG_LEVEL and KNIP_PACKAGE_MANAGER
+		// are no longer supported as env-based overrides.
 	}
 
 	if let Some(custom_settings) = settings.settings {
@@ -296,19 +317,25 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 }
 
 fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde_json::Value) -> zed::Result<()> {
-	if let Some(server_path) = settings
-		.get("server_path")
-		.cloned()
-		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
-	{
-		overrides.server_path = Some(server_path);
+	// Reject removed settings before processing anything else.
+	const REMOVED: &[(&str, &str)] = &[
+		("server_path", "lsp.knip.binary.path"),
+		("log_level", "the Knip config file (configure log verbosity there)"),
+		("package_manager", "the packageManager field in package.json"),
+	];
+	for &(name, replacement) in REMOVED {
+		if settings.get(name).is_some() {
+			return Err(KnipSettingsError::RemovedSetting { name, replacement }.to_string());
+		}
 	}
-	if let Some(package_manager) = settings
-		.get("package_manager")
+
+	// Map supported settings.
+	if let Some(binary_path) = settings
+		.get("binary_path")
 		.cloned()
 		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
 	{
-		overrides.package_manager = Some(package_manager);
+		overrides.binary_path = Some(binary_path);
 	}
 	if let Some(auto_install) = settings
 		.get("auto_install")
@@ -316,13 +343,6 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 		.and_then(|value| zed::serde_json::from_value::<bool>(value).ok())
 	{
 		overrides.auto_install = auto_install;
-	}
-	if let Some(log_level) = settings
-		.get("log_level")
-		.cloned()
-		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
-	{
-		overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
 	}
 	if let Some(config_path) = settings
 		.get("config_path")
@@ -338,7 +358,45 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 	{
 		overrides.require_config = require_config;
 	}
+	if let Some(ts_config_path) = settings
+		.get("ts_config_path")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.ts_config_path = Some(ts_config_path);
+	}
+	if let Some(diag_value) = settings.get("diagnostics") {
+		overrides.diagnostics = parse_diagnostics_settings(diag_value)?;
+	}
+
 	Ok(())
+}
+
+fn parse_diagnostics_settings(value: &zed::serde_json::Value) -> zed::Result<KnipDiagnosticsSettings> {
+	let mut diag = KnipDiagnosticsSettings::default();
+
+	if let Some(obj) = value.as_object() {
+		if let Some(include) = obj.get("include_issue_types").and_then(|v| v.as_array()) {
+			diag.include_issue_types = include.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(exclude) = obj.get("exclude_issue_types").and_then(|v| v.as_array()) {
+			diag.exclude_issue_types = exclude.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(prefixes) = obj.get("exclude_path_prefixes").and_then(|v| v.as_array()) {
+			diag.exclude_path_prefixes = prefixes.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(severity_map) = obj.get("severity_by_issue_type").and_then(|v| v.as_object()) {
+			for (issue_type, severity_value) in severity_map {
+				if let Some(severity_str) = severity_value.as_str() {
+					let severity =
+						DiagnosticSeverity::parse_with_type(issue_type, severity_str).map_err(|e| e.to_string())?;
+					diag.severity_by_issue_type.insert(issue_type.clone(), severity);
+				}
+			}
+		}
+	}
+
+	Ok(diag)
 }
 
 fn reject_binary_arguments(arguments: &[String]) -> zed::Result<()> {
@@ -479,6 +537,7 @@ mod tests {
 			binary: Some(zed::settings::CommandSettings {
 				path: Some("tools/knip-language-server".to_string()),
 				arguments: None,
+				// env is intentionally not parsed; these values are ignored
 				env: Some(HashMap::from([
 					("KNIP_PACKAGE_MANAGER".to_string(), "npm".to_string()),
 					("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
@@ -486,11 +545,10 @@ mod tests {
 			}),
 			initialization_options: None,
 			settings: Some(zed::serde_json::json!({
-				"package_manager": "pnpm",
 				"auto_install": false,
-				"log_level": "warn",
 				"config_path": "knip.ts",
-				"require_config": true
+				"require_config": true,
+				"ts_config_path": "tsconfig.app.json"
 			})),
 		})
 		.unwrap();
@@ -498,12 +556,13 @@ mod tests {
 		assert_eq!(
 			settings,
 			KnipSettings {
-				server_path: Some("tools/knip-language-server".to_string()),
-				package_manager: Some("pnpm".to_string()),
+				binary_path: Some("tools/knip-language-server".to_string()),
 				auto_install: false,
-				log_level: LogLevel::Warn,
 				config_path: Some("knip.ts".to_string()),
 				require_config: true,
+				ts_config_path: Some("tsconfig.app.json".to_string()),
+				diagnostics: KnipDiagnosticsSettings::default(),
+				..KnipSettings::default()
 			}
 		);
 	}

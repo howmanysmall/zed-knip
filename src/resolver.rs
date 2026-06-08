@@ -35,7 +35,7 @@ pub fn resolve_knip(
 ) -> Result<ResolvedKnip, KnipError> {
 	let workspace_root = cache.worktree_root.as_path();
 
-	if let Some(explicit_path) = settings.server_path.as_deref() {
+	if let Some(explicit_path) = settings.binary_path.as_deref() {
 		let executable_path = resolve_configured_path(workspace_root, explicit_path);
 		validate_explicit_path(&executable_path)?;
 		return Ok(ResolvedKnip {
@@ -294,7 +294,7 @@ mod tests {
 		cache.executable_path = Some(cached);
 		cache.install_source = InstallSource::ManagedCache;
 		let settings = KnipSettings {
-			server_path: Some("tools/knip-language-server".to_string()),
+			binary_path: Some("tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -437,7 +437,7 @@ class LanguageServer {
 		);
 		workspace.write(
 			"node_modules/@knip/language-server/src/server.js",
-			"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';\n\nclass LanguageServer {\n  constructor() {\n    this.documents.listen(this.connection);\n    this.connection.listen();\n  }\n\n  onInitialize() {\n    const capabilities = {\n        codeActionProvider: {},\n    };\n    return { capabilities };\n  }\n}\n",
+			"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';\n\nclass LanguageServer {\n  constructor() {\n    this.documents.listen(this.connection);\n    this.connection.listen();\n  }\n\n  buildDiagnostics(issues, config, rules) {\n    for (const issue of Object.values(issues)) {\n      for (const uri of Object.keys(issue.files)) {\n          const document = this.documents.get(uri);\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n          this.issuesByUri.set(uri, []);\n      }\n    }\n  }\n\n  async resolveConfig() {\n    const configFilePath = config?.configFilePath;\n    const options = await knip.createOptions({ cwd: this.cwd, isSession: true, args: { config: configFilePath } });\n    return options;\n  }\n\n  onInitialize() {\n    const capabilities = {\n        codeActionProvider: {},\n    };\n    return { capabilities };\n  }\n}\n",
 		);
 		let bin_dir = workspace.root.join("node_modules").join(".bin");
 		fs::create_dir_all(&bin_dir).unwrap_or_else(|error| panic!("failed to create {}: {error}", bin_dir.display()));
@@ -459,7 +459,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let invalid = workspace.root.join("missing/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some("missing/knip-language-server".to_string()),
+			binary_path: Some("missing/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -474,7 +474,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let path = workspace.write("tools/knip-language-server", "not executable\n");
 		let settings = KnipSettings {
-			server_path: Some("tools/knip-language-server".to_string()),
+			binary_path: Some("tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -645,7 +645,7 @@ class LanguageServer {
 		fs::create_dir_all(&directory)
 			.unwrap_or_else(|error| panic!("failed to create {}: {error}", directory.display()));
 		let settings = KnipSettings {
-			server_path: Some("tools".to_string()),
+			binary_path: Some("tools".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -660,7 +660,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("absolute/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some(explicit.display().to_string()),
+			binary_path: Some(explicit.display().to_string()),
 			..KnipSettings::default()
 		};
 
@@ -722,7 +722,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("tools/knip language server");
 		let settings = KnipSettings {
-			server_path: Some(explicit.display().to_string()),
+			binary_path: Some(explicit.display().to_string()),
 			..KnipSettings::default()
 		};
 
@@ -738,7 +738,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("my tools/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some("my tools/knip-language-server".to_string()),
+			binary_path: Some("my tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
