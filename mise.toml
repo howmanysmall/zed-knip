@@ -30,17 +30,6 @@ install = "cargo install --path ."
 lint = "cargo clippy --all-targets -- -D warnings"
 test = "cargo nextest run"
 
-bi = "cargo build"
-br = "cargo build --release"
-ti = "cargo nextest run"
-
-ta = "cargo nextest run --all-targets --all-features"
-bw = "cargo build --release --target wasm32-wasip2"
-fa = "npm run format"
-la = "aube run lint"
-tc = "aube run type-check"
-pc = "./scripts/pre-commit.sh"
-
 [tasks.test-all]
 description = "Run the full test suite (unit + integration + all targets + all features)"
 run = "cargo nextest run --all-targets --all-features"
@@ -100,18 +89,6 @@ echo "  • The WASM file must be named exactly 'extension.wasm'."
 [tasks.pre-commit]
 description = "Run the full pre-commit gate (format + clippy + audit + deny + shear + gitleaks)"
 run = "./scripts/pre-commit.sh"
-
-[tasks.format-all]
-description = "Format every file in the repo (Rust + JS/TS + Markdown + TOML + JSON)"
-run = "npm run format"
-
-[tasks.lint-all]
-description = "Run the full lint pipeline via aube (oxlint + biome)"
-run = "aube run lint"
-
-[tasks.type-check]
-description = "Type-check the TypeScript tooling code"
-run = "aube run type-check"
 
 [tasks.verify]
 description = "Full local verification: all tests + clippy + WASM build"

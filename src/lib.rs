@@ -154,9 +154,10 @@ fn language_server_initialization_options_for_worktree(
 		return Err(unsupported_language_server_error(language_server_id));
 	}
 
+	let workspace_root = worktree.root_path();
 	let settings = settings_for_worktree(worktree, worktree.lsp_settings(language_server_id)?)?;
 
-	Ok(Some(knip_initialization_options(&settings)))
+	Ok(Some(knip_initialization_options(&settings, workspace_root.as_path())))
 }
 
 fn language_server_workspace_configuration_for_worktree(
@@ -172,8 +173,11 @@ fn language_server_workspace_configuration_for_worktree(
 	Ok(Some(knip_workspace_configuration(&settings)))
 }
 
-fn knip_initialization_options(settings: &KnipSettings) -> zed::serde_json::Value {
-	zed::serde_json::json!({ "config": knip_workspace_configuration(settings) })
+fn knip_initialization_options(settings: &KnipSettings, workspace_root: &std::path::Path) -> zed::serde_json::Value {
+	zed::serde_json::json!({
+		"cwd": workspace_root.display().to_string(),
+		"config": knip_workspace_configuration(settings)
+	})
 }
 
 fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Value {
@@ -274,7 +278,7 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 	if let Some(binary) = settings.binary {
 		overrides.server_path = binary.path;
 		if let Some(arguments) = binary.arguments {
-			overrides.extra_args = arguments;
+			reject_binary_arguments(&arguments)?;
 		}
 		if let Some(env) = binary.env {
 			overrides.package_manager = env.get("KNIP_PACKAGE_MANAGER").cloned();
@@ -335,6 +339,21 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 		overrides.require_config = require_config;
 	}
 	Ok(())
+}
+
+fn reject_binary_arguments(arguments: &[String]) -> zed::Result<()> {
+	if arguments.is_empty() {
+		return Ok(());
+	}
+
+	Err(format!(
+		"`lsp.knip.binary.arguments` is not supported. `@knip/language-server` ignores launch arguments like {}. Move Knip analysis settings into your Knip config file and point the extension at it with `lsp.knip.settings.config_path`.",
+		arguments
+			.iter()
+			.map(|argument| format!("`{argument}`"))
+			.collect::<Vec<_>>()
+			.join(", ")
+	))
 }
 
 fn unsupported_language_server_error(language_server_id: &str) -> String {
@@ -459,7 +478,7 @@ mod tests {
 		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
 			binary: Some(zed::settings::CommandSettings {
 				path: Some("tools/knip-language-server".to_string()),
-				arguments: Some(vec!["--from-binary".to_string()]),
+				arguments: None,
 				env: Some(HashMap::from([
 					("KNIP_PACKAGE_MANAGER".to_string(), "npm".to_string()),
 					("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
@@ -483,7 +502,6 @@ mod tests {
 				package_manager: Some("pnpm".to_string()),
 				auto_install: false,
 				log_level: LogLevel::Warn,
-				extra_args: vec!["--from-binary".to_string()],
 				config_path: Some("knip.ts".to_string()),
 				require_config: true,
 			}
@@ -491,11 +509,29 @@ mod tests {
 	}
 
 	#[test]
-	fn lsp_settings_keep_binary_arguments_when_custom_extra_args_are_missing() {
+	fn lsp_settings_reject_binary_arguments() {
+		let error = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: Some(vec!["--tsConfig".to_string(), "tsconfig.lib.json".to_string()]),
+				env: None,
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+
+		assert!(error.contains("`lsp.knip.binary.arguments` is not supported"));
+		assert!(error.contains("`--tsConfig`"));
+		assert!(error.contains("`lsp.knip.settings.config_path`"));
+	}
+
+	#[test]
+	fn lsp_settings_accept_empty_binary_arguments() {
 		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
 			binary: Some(zed::settings::CommandSettings {
 				path: None,
-				arguments: Some(vec!["--binary-only".to_string()]),
+				arguments: Some(Vec::new()),
 				env: None,
 			}),
 			initialization_options: None,
@@ -505,7 +541,6 @@ mod tests {
 		})
 		.unwrap();
 
-		assert_eq!(settings.extra_args, vec!["--binary-only".to_string()]);
 		assert_eq!(settings.config_path.as_deref(), Some("knip.ts"));
 	}
 
@@ -604,11 +639,13 @@ mod tests {
 			.unwrap()
 			.unwrap();
 		let expected_config_path = config.display().to_string();
+		let expected_cwd = worktree.root.display().to_string();
 
 		assert_eq!(
 			options["config"]["configFilePath"].as_str(),
 			Some(expected_config_path.as_str())
 		);
+		assert_eq!(options["cwd"].as_str(), Some(expected_cwd.as_str()));
 		assert_eq!(options["config"]["editor"]["exports"]["quickfix"]["enabled"], true);
 	}
 

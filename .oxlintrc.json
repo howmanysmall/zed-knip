@@ -1276,7 +1276,7 @@
 		"unicorn/text-encoding-identifier-case": "error",
 		"unicorn/throw-new-error": "error",
 		"unused-imports/no-unused-imports": "error",
-		"unused-imports/no-unused-vars": "error",
+		"unused-imports/no-unused-vars": "off",
 		"use-isnan": "error",
 		"valid-typeof": "error",
 		"vars-on-top": "error",

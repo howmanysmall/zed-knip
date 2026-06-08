@@ -72,7 +72,6 @@ Zed's standard binary configuration for controlling how the language server proc
     "knip": {
       "binary": {
         "path": "/path/to/knip-language-server",
-        "arguments": ["--no-gitignore"],
         "env": {
           "KNIP_LOG_LEVEL": "debug",
           "KNIP_PACKAGE_MANAGER": "pnpm"
@@ -86,7 +85,6 @@ Zed's standard binary configuration for controlling how the language server proc
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `path` | `string?` | Explicit path to the Knip language server binary. Same as `settings.server_path`. |
-| `arguments` | `string[]` | Extra CLI flags forwarded to the language server. |
 | `env.KNIP_LOG_LEVEL` | `string` | Server log verbosity. Overrides `settings.log_level`. |
 | `env.KNIP_PACKAGE_MANAGER` | `string` | Package manager override. Overrides `settings.package_manager`. |
 
@@ -95,10 +93,16 @@ Zed's standard binary configuration for controlling how the language server proc
 Override order, highest to lowest:
 
 1. JSON — `lsp.knip.settings.*` — individual field overrides
-2. Binary — `lsp.knip.binary.*` — `path`, `arguments`, and `env` variables
+2. Binary — `lsp.knip.binary.path` and supported `lsp.knip.binary.env.*` overrides
 3. Defaults — built-in values
 
-If both `lsp.knip.binary.arguments` and `lsp.knip.settings` are configured for extra args, binary wins.
+### Limitations
+
+`lsp.knip.binary.arguments` is intentionally unsupported. `@knip/language-server` does not consume arbitrary launch arguments, so flags such as `--tsConfig`, `--preprocessor`, or `--no-gitignore` will not affect diagnostics in Zed.
+
+Configure Knip behavior through your actual Knip config file instead, then point the extension at it with `lsp.knip.settings.config_path` when auto-detection is not enough.
+
+Knip CLI preprocessors and reporters are also outside the language-server diagnostic path. If you need editor-specific filtering, express it in Knip configuration such as `entry`, `project`, `ignore`, or related workspace config.
 
 ## Development
 
