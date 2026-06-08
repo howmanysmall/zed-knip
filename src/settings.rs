@@ -22,10 +22,6 @@ pub struct KnipSettings {
 	///
 	/// Default: [`LogLevel::Info`].
 	pub log_level: LogLevel,
-	/// Extra CLI arguments forwarded to the language server.
-	///
-	/// Default: empty.
-	pub extra_args: Vec<String>,
 	/// Explicit Knip config path.
 	///
 	/// Default: `None`.
@@ -43,7 +39,6 @@ impl Default for KnipSettings {
 			package_manager: None,
 			auto_install: true,
 			log_level: LogLevel::Info,
-			extra_args: Vec::new(),
 			config_path: None,
 			require_config: false,
 		}
@@ -60,7 +55,6 @@ impl KnipSettings {
 			package_manager: overrides.package_manager.or(self.package_manager),
 			auto_install: overrides.auto_install,
 			log_level: overrides.log_level,
-			extra_args: overrides.extra_args,
 			config_path: overrides.config_path.or(self.config_path),
 			require_config: overrides.require_config,
 		}
@@ -167,7 +161,6 @@ mod tests {
 				package_manager: None,
 				auto_install: true,
 				log_level: LogLevel::Info,
-				extra_args: Vec::new(),
 				config_path: None,
 				require_config: false,
 			}
@@ -210,10 +203,5 @@ mod tests {
 			LogLevel::from_str("garbage"),
 			Err(KnipSettingsError::InvalidLogLevel("garbage".to_string()))
 		);
-	}
-
-	#[test]
-	fn settings_extra_args_empty_by_default() {
-		assert!(KnipSettings::default().extra_args.is_empty());
 	}
 }

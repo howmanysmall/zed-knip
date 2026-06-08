@@ -94,6 +94,13 @@
 			},
 		},
 	},
+	"command": {
+		"goal": {
+			"agent": "build",
+			"description": "Set a session-scoped goal and auto-continue until complete.",
+			"template": "$ARGUMENTS",
+		},
+	},
 	"experimental": {
 		"batch_tool": true,
 	},
@@ -295,14 +302,14 @@
 			"url": "https://mcp.grep.app",
 		},
 		"github": {
-			"enabled": true,
+			"enabled": false,
 			"headers": { "Authorization": "Bearer {env:GITHUB_PAT}" },
 			"type": "remote",
 			"url": "https://api.githubcopilot.com/mcp/",
 		},
 		"package-registry": {
 			"command": ["package-registry-mcp"],
-			"enabled": true,
+			"enabled": false,
 			"type": "local",
 		},
 	},
@@ -338,7 +345,7 @@
 		"skill": "ask",
 		"webfetch": "ask",
 	},
-	"plugin": ["opencode-wakatime"],
+	"plugin": ["opencode-wakatime", "@mohak34/opencode-notifier@latest", "opencode-goal-plugin"],
 	"provider": {
 		"openai": {
 			"models": {
@@ -352,5 +359,4 @@
 		},
 	},
 	"shell": "fish",
-	"username": "zed-knip",
 }

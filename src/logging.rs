@@ -6,7 +6,7 @@
 //! configured level are silently dropped.
 //!
 //! Install progress is modelled as a pure-data [`InstallProgress`] enum whose
-//! [`Display`] impl produces the user-visible string. Callers emit the string
+//! [`fmt::Display`] impl produces the user-visible string. Callers emit the string
 //! through the logger at [`LogLevel::Info`] so the UX path is also filtered by
 //! the user's log-level preference.
 
@@ -133,7 +133,7 @@ impl LogLevel {
 /// construct them on any code path and hand them to [`Logger::install_progress`]
 /// when they want to surface the message.
 ///
-/// The [`Display`] impl produces the string shown to the user.
+/// The [`fmt::Display`] impl produces the string shown to the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallProgress {
 	/// Checking whether a cached install is still valid.

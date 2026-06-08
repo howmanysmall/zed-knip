@@ -1,7 +1,7 @@
 import { isCallbackFunction, isExportNamedDeclaration } from "@oxlint-utilities/oxc-utilities";
 import { defineRule } from "oxlint-plugin-utilities";
 
-import type { ESTree, Fix, Scope, Visitor } from "oxlint-plugin-utilities";
+import type { ESTree, Fix, Scope, SourceCode, Visitor } from "oxlint-plugin-utilities";
 
 const SCREAMING_SNAKE_CASE = /^[A-Z][A-Z0-9_]*$/u;
 const OBJECT_CONSTRUCTOR_PATTERNS: ReadonlyArray<string> = [
@@ -48,7 +48,7 @@ function isFunctionLikeInitializer(node: ESTree.Node): boolean {
 function isObjectLikeInitializer(
 	initializer: ESTree.Expression,
 	patterns: ReadonlyArray<RegExp>,
-	sourceCode: { getText(node: ESTree.Node): string },
+	sourceCode: SourceCode,
 ): boolean {
 	if (initializer.type === "ArrayExpression" || initializer.type === "ObjectExpression") return true;
 	if (initializer.type === "JSXElement" || initializer.type === "JSXFragment") return true;

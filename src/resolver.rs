@@ -98,8 +98,6 @@ pub fn build_language_server_command(
 		);
 	}
 
-	args.extend(settings.extra_args.iter().cloned());
-
 	let command = zed::Command {
 		command: resolved.executable_path.display().to_string(),
 		args,
@@ -535,7 +533,6 @@ class LanguageServer {
 		let config = workspace.write("knip.json", "{}\n");
 		let settings = KnipSettings {
 			log_level: LogLevel::Debug,
-			extra_args: vec!["--trace".to_string()],
 			config_path: Some("knip.json".to_string()),
 			..KnipSettings::default()
 		};
@@ -557,7 +554,6 @@ class LanguageServer {
 				command.working_dir.display().to_string(),
 				"--config".to_string(),
 				config.display().to_string(),
-				"--trace".to_string(),
 			]
 		);
 		assert_eq!(
