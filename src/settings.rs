@@ -173,6 +173,32 @@ impl KnipSettings {
 			&& self.diagnostics.severity_by_issue_type.is_empty()
 	}
 
+	/// Returns the names of currently active advanced settings that require the
+	/// managed-install patch.
+	///
+	/// Used in error messages to tell the user exactly which settings to unset.
+	/// Only user-facing advanced settings are listed; `binary.path` is not
+	/// included here because the resolver adds it separately when relevant.
+	pub fn advanced_settings_list(&self) -> Vec<&'static str> {
+		let mut advanced: Vec<&'static str> = Vec::new();
+		if self.ts_config_path.is_some() {
+			advanced.push("lsp.knip.settings.ts_config_path");
+		}
+		if !self.diagnostics.include_issue_types.is_empty() {
+			advanced.push("lsp.knip.settings.diagnostics.include_issue_types");
+		}
+		if !self.diagnostics.exclude_issue_types.is_empty() {
+			advanced.push("lsp.knip.settings.diagnostics.exclude_issue_types");
+		}
+		if !self.diagnostics.exclude_path_prefixes.is_empty() {
+			advanced.push("lsp.knip.settings.diagnostics.exclude_path_prefixes");
+		}
+		if !self.diagnostics.severity_by_issue_type.is_empty() {
+			advanced.push("lsp.knip.settings.diagnostics.severity_by_issue_type");
+		}
+		advanced
+	}
+
 	/// Validate user-provided settings values.
 	pub fn validate(&self) -> Result<(), KnipSettingsError> {
 		if matches!(self.binary_path.as_deref(), Some("")) {

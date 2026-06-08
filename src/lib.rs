@@ -499,6 +499,7 @@ mod tests {
 	#[derive(Debug)]
 	struct TestWorktree {
 		root: PathBuf,
+		settings_override: Option<KnipSettings>,
 	}
 
 	impl TestWorktree {
@@ -509,7 +510,15 @@ mod tests {
 				.as_nanos();
 			let root = std::env::temp_dir().join(format!("zed-knip-lib-{name}-{nanos}"));
 			fs::create_dir_all(&root).unwrap_or_else(|error| panic!("failed to create {}: {error}", root.display()));
-			Self { root }
+			Self {
+				root,
+				settings_override: None,
+			}
+		}
+
+		fn with_settings_override(mut self, settings: KnipSettings) -> Self {
+			self.settings_override = Some(settings);
+			self
 		}
 
 		fn write(&self, relative_path: &str, contents: &str) -> PathBuf {
@@ -535,7 +544,7 @@ mod tests {
 		}
 
 		fn lsp_settings(&self, _language_server_id: &str) -> zed::Result<Option<KnipSettings>> {
-			Ok(None)
+			Ok(self.settings_override.clone())
 		}
 
 		fn read_text_file(&self, relative_path: &str) -> Option<String> {
@@ -1019,6 +1028,66 @@ mod tests {
 		assert!(
 			error.contains("ts_config_path") || error.contains(".."),
 			"error for parent traversal must mention ts_config_path or '..', got: {error}"
+		);
+	}
+
+	#[test]
+	fn custom_binary_path_supports_baseline_stdio_launch() {
+		let worktree = TestWorktree::new("custom-baseline-stdio");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		let custom_binary = worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(
+			command.command,
+			custom_binary.display().to_string(),
+			"custom binary.path must be used when no advanced setting is enabled"
+		);
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio'] for a baseline custom binary"
+		);
+		assert!(command.env.is_empty(), "env must be empty for a baseline custom binary");
+	}
+
+	#[test]
+	fn custom_binary_rejects_ts_config_path() {
+		let worktree = TestWorktree::new("custom-rejects-ts-config");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+		worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("ts_config_path"),
+			"error must mention ts_config_path, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
 		);
 	}
 }

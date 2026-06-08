@@ -36,14 +36,8 @@ pub fn resolve_knip(
 	let workspace_root = cache.worktree_root.as_path();
 
 	if settings.requires_managed_patch() && (settings.binary_path.is_some() || !settings.auto_install) {
-		let mut advanced: Vec<&'static str> = Vec::new();
-		if settings.ts_config_path.is_some() {
-			advanced.push("ts_config_path");
-		}
-		if !settings.diagnostics_is_default() {
-			advanced.push("diagnostics");
-		}
-		if settings.binary_path.is_some() {
+		let mut advanced = settings.advanced_settings_list();
+		if settings.binary_path.is_some() && !advanced.contains(&"lsp.knip.binary.path") {
 			advanced.push("lsp.knip.binary.path");
 		}
 		return Err(KnipError::AdvancedSettingsRequireManaged { advanced });

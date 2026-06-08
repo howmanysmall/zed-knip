@@ -83,11 +83,21 @@ impl fmt::Display for KnipError {
 				"Multiple package managers were detected ({}). Remove the extra lockfile(s) or set the package manager explicitly in settings.",
 				found.join(", ")
 			),
-			Self::AdvancedSettingsRequireManaged { advanced } => write!(
-				f,
-				"Advanced editor workflow ({}) requires the managed Knip install. Set 'lsp.knip.settings.auto_install = true' or unset the advanced settings.",
-				advanced.join(", ")
-			),
+			Self::AdvancedSettingsRequireManaged { advanced } => {
+				if advanced.contains(&"lsp.knip.binary.path") {
+					write!(
+						f,
+						"Advanced editor workflow settings ({}) require the managed install. Set 'lsp.knip.settings.auto_install = true', or remove 'lsp.knip.binary.path' and the conflicting advanced settings.",
+						advanced.join(", ")
+					)
+				} else {
+					write!(
+						f,
+						"Advanced editor workflow settings ({}) require the managed install. Set 'lsp.knip.settings.auto_install = true' or unset the conflicting advanced settings.",
+						advanced.join(", ")
+					)
+				}
+			}
 			Self::InvalidTsConfigPath { path, reason } => write!(
 				f,
 				"Invalid lsp.knip.settings.ts_config_path: {reason} ({path})",
