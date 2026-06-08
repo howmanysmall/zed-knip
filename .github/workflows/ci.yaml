@@ -85,11 +85,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93.1"
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache cargo-deny
+        id: cargo-deny-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-0.19.0-${{ runner.os }}-v1
+          restore-keys: |
+            cargo-deny-0.19.0-${{ runner.os }}-
       - name: Install cargo-binstall
+        if: steps.cargo-deny-cache.outputs.cache-hit != 'true'
         uses: cargo-bins/cargo-binstall@main
       - name: Install cargo-deny
+        if: steps.cargo-deny-cache.outputs.cache-hit != 'true'
         run: cargo binstall --force --no-confirm cargo-deny@0.19.0
       - run: cargo deny check
 
