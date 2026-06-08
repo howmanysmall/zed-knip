@@ -1,6 +1,6 @@
 # Zed Knip
 
-This Zed extension wraps [Knip](https://knip.dev/) - the linter that spots unused files, dependencies, and exports in JS/TS projects.
+This Zed extension wraps [Knip](https://knip.dev/) — the linter that spots unused files, dependencies, and exports in JS/TS projects.
 
 ## What it does
 
@@ -9,106 +9,97 @@ Zed Knip runs the Knip language server in the background, flagging unused code a
 ## Features
 
 - **Diagnostics**: See warnings for unused files, dependencies, exports, and circular dependencies right in your editor.
-- **Code Actions**: Quick fixes to ditch unused exports or dependencies, plus a way to mark exports as intentional with JSDoc tags.
-- **Hover Support**: Hover over exports or dependencies to see how many times they're used.
-- **Managed Installation**: The extension grabs and manages the Knip language server for you if it's missing from your workspace.
-- **Package Manager Detection**: Works with npm, pnpm, yarn, or bun without any extra config.
-
-## Installation
-
-### Local Development Install
-
-1. Build the extension WASM artifact:
-
-   ```sh
-   mise x -- cargo build --release --target wasm32-wasip2
-   ```
-
-2. Copy the extension directory to your local Zed extensions folder:
-
-   - **macOS**: `~/Library/Application Support/Zed/extensions/installed/zed-knip/`
-   - **Linux**: `~/.local/share/zed/extensions/installed/zed-knip/`
-
-   The directory should contain `extension.toml` and the compiled `extension.wasm` (rename `target/wasm32-wasip2/release/zed_knip.wasm` to `extension.wasm`).
-
-3. Restart Zed to load the extension.
+- **Code Actions**: Quick fixes to ditch unused exports or dependencies from upstream Knip (\`CodeActionKind.QuickFix\`).
+- **Managed Installation**: The extension manages the \`@knip/language-server\` install for you if it is missing from your workspace.
+- **Advanced Diagnostic Filtering**: Fine-grained control over which Knip issues are reported.
+- **Custom TS Config**: Support for alternate TypeScript configurations via \`ts_config_path\`.
+- **Optional Explicit Config**: Point the extension at a specific Knip configuration file.
 
 ## Settings
 
-Configure the extension under `lsp.knip` in your Zed `settings.json`. Settings here override anything auto-detected from your workspace.
+Configure the extension under \`lsp.knip\` in your Zed \`settings.json\`.
 
-### `lsp.knip.settings`
+### \`lsp.knip.settings\`
 
-```json
+\`\`\`json
 {
   "lsp": {
     "knip": {
       "settings": {
         "auto_install": true,
-        "log_level": "info",
-        "require_config": false
-      }
-    }
-  }
-}
-```
-
-| Setting | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `server_path` | `string?` | `null` | Explicit path to the Knip language server binary. |
-| `package_manager` | `string?` | `null` | Override detected package manager: `npm`, `pnpm`, `yarn`, `bun`. |
-| `auto_install` | `boolean` | `true` | Let the extension download and manage Knip when it's not found locally. |
-| `log_level` | `string` | `"info"` | Server log verbosity: `trace`, `debug`, `info`, `warn`, `error`. |
-| `config_path` | `string?` | `null` | Explicit path to your Knip config file. |
-| `require_config` | `boolean` | `false` | Only start the server if a Knip config file exists. |
-
-### `lsp.knip.binary`
-
-Zed's standard binary configuration for controlling how the language server process is launched:
-
-```json
-{
-  "lsp": {
-    "knip": {
-      "binary": {
-        "path": "/path/to/knip-language-server",
-        "env": {
-          "KNIP_LOG_LEVEL": "debug",
-          "KNIP_PACKAGE_MANAGER": "pnpm"
+        "config_path": "knip.json",
+        "require_config": false,
+        "ts_config_path": "tsconfig.knip.json",
+        "diagnostics": {
+          "include_issue_types": ["files", "dependencies"],
+          "exclude_issue_types": ["duplicates"],
+          "exclude_path_prefixes": ["src/legacy/"],
+          "severity_by_issue_type": {
+            "unlisted": "error",
+            "exports": "warn"
+          }
         }
       }
     }
   }
 }
-```
+\`\`\`
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `path` | `string?` | Explicit path to the Knip language server binary. Same as `settings.server_path`. |
-| `env.KNIP_LOG_LEVEL` | `string` | Server log verbosity. Overrides `settings.log_level`. |
-| `env.KNIP_PACKAGE_MANAGER` | `string` | Package manager override. Overrides `settings.package_manager`. |
+| Setting | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| \`auto_install\` | \`boolean\` | \`true\` | Let the extension download and manage Knip when it is not found locally. |
+| \`config_path\` | \`string?\` | \`null\` | Explicit path to your Knip config file. |
+| \`require_config\` | \`boolean\` | \`false\` | Only start the server if a Knip config file exists. |
+| \`ts_config_path\` | \`string?\` | \`null\` | Alternate TS config path. **Requires Managed Install.** |
+| \`diagnostics.include_issue_types\` | \`array\` | \`[]\` | Issue types to include. Defaults to all if empty. **Requires Managed Install.** |
+| \`diagnostics.exclude_issue_types\` | \`array\` | \`[]\` | Issue types to exclude (wins over include). **Requires Managed Install.** |
+| \`diagnostics.exclude_path_prefixes\` | \`array\` | \`[]\` | POSIX-normalized path prefixes to ignore. **Requires Managed Install.** |
+| \`diagnostics.severity_by_issue_type\` | \`object\` | \`{}\` | Map of issue types to severity levels. **Requires Managed Install.** |
 
-### Precedence
+### \`lsp.knip.binary\`
 
-Override order, highest to lowest:
+Zed standard binary configuration for custom language server paths:
 
-1. JSON — `lsp.knip.settings.*` — individual field overrides
-2. Binary — `lsp.knip.binary.path` and supported `lsp.knip.binary.env.*` overrides
-3. Defaults — built-in values
+\`\`\`json
+{
+  "lsp": {
+    "knip": {
+      "binary": {
+        "path": "/path/to/custom/knip-language-server"
+      }
+    }
+  }
+}
+\`\`\`
 
-### Limitations
+**Note:** Using \`binary.path\` for a baseline custom language server does NOT support advanced features like \`ts_config_path\` or \`diagnostics\` filters.
 
-`lsp.knip.binary.arguments` is intentionally unsupported. `@knip/language-server` does not consume arbitrary launch arguments, so flags such as `--tsConfig`, `--preprocessor`, or `--no-gitignore` will not affect diagnostics in Zed.
+## Diagnostic Filtering Semantics
 
-Configure Knip behavior through your actual Knip config file instead, then point the extension at it with `lsp.knip.settings.config_path` when auto-detection is not enough.
+The \`diagnostics\` object allows you to filter which issues are reported by the language server.
 
-Knip CLI preprocessors and reporters are also outside the language-server diagnostic path. If you need editor-specific filtering, express it in Knip configuration such as `entry`, `project`, `ignore`, or related workspace config.
+- \`include_issue_types\`: Defaults to all types if empty.
+- \`exclude_issue_types\`: Takes precedence over \`include_issue_types\`.
+- \`exclude_path_prefixes\`: POSIX-normalized paths relative to workspace root.
+- \`severity_by_issue_type\`: Map issue types to \`error\`, \`warn\`, \`info\`, \`hint\`, or \`off\`.
+
+### Valid Issue Types
+
+The following 15 issue types are supported:
+\`files\`, \`dependencies\`, \`devDependencies\`, \`optionalPeerDependencies\`, \`unlisted\`, \`binaries\`, \`unresolved\`, \`exports\`, \`types\`, \`nsExports\`, \`nsTypes\`, \`duplicates\`, \`enumMembers\`, \`namespaceMembers\`, \`catalog\`.
+
+## Limitations
+
+- \`lsp.knip.binary.arguments\` is rejected. The Knip language server only recognizes transport flags (e.g., \`--stdio\`).
+- CLI preprocessors and reporters are NOT available in the editor workflow.
+- Alternate TS configuration is handled via \`ts_config_path\` (Managed Install only) instead of launch arguments.
+- Removed settings such as explicit server path overrides in settings, log levels, or package manager overrides are rejected.
 
 ## Development
 
 ### Build and Test
 
-```sh
+\`\`\`sh
 # Run tests
 mise x -- cargo nextest run --no-tests=pass
 
@@ -117,32 +108,36 @@ mise x -- cargo nextest run --all-targets --all-features
 
 # Build for WASM
 mise x -- cargo build --release --target wasm32-wasip2
-```
+\`\`\`
 
 ### Formatting and Linting
 
-```sh
-# Format files
+\`\`\`sh
+# Format all files
 npm run format
 
-# Run clippy
-cargo clippy --all-targets -- -D warnings
-```
+# Lint all files
+aube run lint
+\`\`\`
 
 ## Architecture
 
 | Module | Purpose |
 | :--- | :--- |
-| `lib.rs` | Extension entry point — registers `ZedKnipExtension`. |
-| `config_detection.rs` | Detects Knip configuration files in workspaces. |
-| `package_manager.rs` | Detects the workspace package manager via lockfiles. |
-| `resolver.rs` | Resolves the Knip executable path. |
-| `settings.rs` | Extension settings schema. |
-| `cache.rs` | Managed install caching. |
-| `managed_install.rs` | Downloads and manages Knip binary installs. |
-| `reports.rs` | Parses and formats Knip output reports. |
-| `logging.rs` | Extension logging utilities. |
-| `errors.rs` | Central error handling for the extension. |
+| \`lib.rs\` | Extension entry point — registers \`ZedKnipExtension\`. |
+| \`config_detection.rs\` | Detects Knip configuration files in workspaces. |
+| \`pm.rs\` | Detects the workspace package manager via lockfiles. |
+| \`resolver.rs\` | Resolves the Knip executable path. |
+| \`settings.rs\` | Extension settings schema. |
+| \`cache.rs\` | Managed install caching. |
+| \`managed_install.rs\` | Downloads and manages Knip binary installs. |
+| \`reports.rs\` | Parses and formats Knip output reports. |
+| \`logging.rs\` | Extension logging utilities. |
+| \`errors.rs\` | Central error handling for the extension. |
+
+## Upstream Project
+
+For more information about Knip itself, visit the [official repository](https://github.com/webpro-nl/knip).
 
 ## License
 
