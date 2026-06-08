@@ -522,6 +522,16 @@ fn failure_all_error_variants_produce_non_empty_messages() {
 		KnipError::AmbiguousPackageManager {
 			found: vec!["package-lock.json".to_string(), "yarn.lock".to_string()],
 		},
+		KnipError::AdvancedSettingsRequireManaged {
+			advanced: vec!["ts_config_path"],
+		},
+		KnipError::InvalidTsConfigPath {
+			path: PathBuf::from("tsconfig.json"),
+			reason: "file not found".to_string(),
+		},
+		KnipError::RequireConfigMissing {
+			workspace_root: PathBuf::from("/workspace"),
+		},
 	];
 
 	for error in variants {

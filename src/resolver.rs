@@ -35,6 +35,20 @@ pub fn resolve_knip(
 ) -> Result<ResolvedKnip, KnipError> {
 	let workspace_root = cache.worktree_root.as_path();
 
+	if settings.requires_managed_patch() && (settings.binary_path.is_some() || !settings.auto_install) {
+		let mut advanced: Vec<&'static str> = Vec::new();
+		if settings.ts_config_path.is_some() {
+			advanced.push("ts_config_path");
+		}
+		if !settings.diagnostics_is_default() {
+			advanced.push("diagnostics");
+		}
+		if settings.binary_path.is_some() {
+			advanced.push("lsp.knip.binary.path");
+		}
+		return Err(KnipError::AdvancedSettingsRequireManaged { advanced });
+	}
+
 	if let Some(explicit_path) = settings.binary_path.as_deref() {
 		let executable_path = resolve_configured_path(workspace_root, explicit_path);
 		validate_explicit_path(&executable_path)?;
@@ -47,13 +61,15 @@ pub fn resolve_knip(
 
 	let package_manager = resolve_package_manager(settings, cache)?;
 
-	if let Some(executable_path) = workspace_local_language_server(workspace_root) {
-		validate_candidate_path(&executable_path)?;
-		return Ok(ResolvedKnip {
-			executable_path,
-			package_manager,
-			install_source: InstallSource::WorkspaceLocal,
-		});
+	if !settings.requires_managed_patch() {
+		if let Some(executable_path) = workspace_local_language_server(workspace_root) {
+			validate_candidate_path(&executable_path)?;
+			return Ok(ResolvedKnip {
+				executable_path,
+				package_manager,
+				install_source: InstallSource::WorkspaceLocal,
+			});
+		}
 	}
 
 	if let Some(executable_path) = managed_cache_path(cache) {

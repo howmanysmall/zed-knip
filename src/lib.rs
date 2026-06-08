@@ -17,7 +17,7 @@ use crate::{
 	resolver::{build_language_server_command, resolve_knip},
 	settings::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError},
 };
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 use zed_extension_api as zed;
 
 const KNIP_LANGUAGE_SERVER_ID: &str = "knip";
@@ -253,12 +253,62 @@ fn settings_for_worktree(
 			.map(|relative_path| workspace_root.join(relative_path).display().to_string());
 	}
 
+	if settings.require_config && settings.config_path.is_none() {
+		return Err(KnipError::RequireConfigMissing {
+			workspace_root: workspace_root.clone(),
+		}
+		.to_string());
+	}
+
+	if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
+		validate_ts_config_path(ts_config_path, &workspace_root)?;
+	}
+
 	if settings.package_manager.is_none() {
 		settings.package_manager = Some(detect_package_manager_for_worktree(worktree)?.to_string());
 	}
 
 	settings.validate().map_err(|error| error.to_string())?;
 	Ok(settings)
+}
+
+fn validate_ts_config_path(ts_config_path: &str, workspace_root: &std::path::Path) -> zed::Result<()> {
+	if ts_config_path.is_empty() {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: PathBuf::from(""),
+			reason: "path cannot be empty".to_string(),
+		}
+		.to_string());
+	}
+
+	let path = std::path::Path::new(ts_config_path);
+
+	if path.is_absolute() {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: "path must be relative to the workspace root, not absolute".to_string(),
+		}
+		.to_string());
+	}
+
+	if path.components().any(|c| c == Component::ParentDir) {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: "path must not contain '..' parent directory traversal".to_string(),
+		}
+		.to_string());
+	}
+
+	let full_path = workspace_root.join(path);
+	if !full_path.is_file() {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: format!("file not found at {}", full_path.display()),
+		}
+		.to_string());
+	}
+
+	Ok(())
 }
 
 fn detect_config_for_worktree(worktree: &impl WorktreeAdapter) -> Option<&'static str> {
@@ -434,6 +484,11 @@ const MODULE_COUNT: usize = 9;
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::{
+		cache::InstallSource,
+		managed_install::{ManagedInstall, ManagedInstallDisabled},
+		package_manager::PackageManager,
+	};
 	use std::{
 		collections::HashMap,
 		fs,
@@ -867,6 +922,111 @@ mod tests {
 		assert!(
 			err.contains("package_manager"),
 			"error must name the removed key 'package_manager', got: {err}"
+		);
+	}
+
+	#[derive(Debug, Clone)]
+	struct MockManagedInstall {
+		path: PathBuf,
+	}
+
+	impl ManagedInstall for MockManagedInstall {
+		fn install(&self, _root: &Path, _pm: PackageManager) -> Result<PathBuf, KnipError> {
+			Ok(self.path.clone())
+		}
+	}
+
+	#[test]
+	fn require_config_blocks_workspace_without_knip_config() {
+		let worktree = TestWorktree::new("require-config-missing");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			require_config: true,
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("require_config"),
+			"error must mention require_config, got: {error}"
+		);
+	}
+
+	#[test]
+	fn advanced_settings_reject_custom_language_server_path() {
+		let worktree = TestWorktree::new("advanced-custom-path");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/knip".to_string()),
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let error = resolve_knip(&settings, &cache, &ManagedInstallDisabled).unwrap_err();
+		let message = error.to_string();
+
+		assert!(
+			message.contains("managed"),
+			"error must mention managed install, got: {message}"
+		);
+		assert!(
+			message.contains("binary.path"),
+			"error must mention binary.path, got: {message}"
+		);
+	}
+
+	#[test]
+	fn advanced_settings_force_managed_install() {
+		let worktree = TestWorktree::new("advanced-force-managed");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+		worktree.executable("node_modules/.bin/knip-language-server");
+		let managed = worktree.executable("managed/knip-language-server");
+
+		let settings = KnipSettings {
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let installer = MockManagedInstall { path: managed.clone() };
+		let resolved = resolve_knip(&settings, &cache, &installer).unwrap();
+
+		assert_eq!(
+			resolved.executable_path, managed,
+			"resolver must use managed install, not workspace-local, when requires_managed_patch"
+		);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
+	}
+
+	#[test]
+	fn ts_config_path_rejects_absolute_or_parent_paths() {
+		let worktree = TestWorktree::new("ts-config-path-invalid");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings_absolute = Some(KnipSettings {
+			ts_config_path: Some("/etc/passwd".to_string()),
+			..KnipSettings::default()
+		});
+		let error = settings_for_worktree(&worktree, settings_absolute).unwrap_err();
+		assert!(
+			error.contains("ts_config_path"),
+			"error for absolute path must mention ts_config_path, got: {error}"
+		);
+
+		let settings_parent = Some(KnipSettings {
+			ts_config_path: Some("../escape.json".to_string()),
+			..KnipSettings::default()
+		});
+		let error = settings_for_worktree(&worktree, settings_parent).unwrap_err();
+		assert!(
+			error.contains("ts_config_path") || error.contains(".."),
+			"error for parent traversal must mention ts_config_path or '..', got: {error}"
 		);
 	}
 }

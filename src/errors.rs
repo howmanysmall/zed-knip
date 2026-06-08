@@ -14,6 +14,9 @@ pub enum KnipError {
 	LanguageServerCrash { exit_code: Option<i32> },
 	UnsupportedWorkspace { reason: String },
 	AmbiguousPackageManager { found: Vec<String> },
+	AdvancedSettingsRequireManaged { advanced: Vec<&'static str> },
+	InvalidTsConfigPath { path: PathBuf, reason: String },
+	RequireConfigMissing { workspace_root: PathBuf },
 }
 
 impl fmt::Display for KnipError {
@@ -79,6 +82,21 @@ impl fmt::Display for KnipError {
 				f,
 				"Multiple package managers were detected ({}). Remove the extra lockfile(s) or set the package manager explicitly in settings.",
 				found.join(", ")
+			),
+			Self::AdvancedSettingsRequireManaged { advanced } => write!(
+				f,
+				"Advanced editor workflow ({}) requires the managed Knip install. Set 'lsp.knip.settings.auto_install = true' or unset the advanced settings.",
+				advanced.join(", ")
+			),
+			Self::InvalidTsConfigPath { path, reason } => write!(
+				f,
+				"Invalid lsp.knip.settings.ts_config_path: {reason} ({path})",
+				path = path.display()
+			),
+			Self::RequireConfigMissing { workspace_root } => write!(
+				f,
+				"lsp.knip.settings.require_config = true but no Knip config was found at {root}. Add a knip.json, knip.ts, or similar file.",
+				root = workspace_root.display()
 			),
 		}
 	}
