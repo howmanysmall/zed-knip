@@ -156,6 +156,11 @@ jobs:
           toolchain: "1.93.1"
       - name: Install cargo-dist
         run: |
+          if [[ ! -f dist-workspace.toml ]]; then
+              echo "dist-workspace.toml is not present; skipping cargo-dist workflow check."
+              exit 0
+          fi
+
           dist_version="$(sed -n 's/^cargo-dist-version = "\(.*\)"/\1/p' dist-workspace.toml)"
           if [[ -z "${dist_version}" ]]; then
               echo "Failed to read cargo-dist-version from dist-workspace.toml"
