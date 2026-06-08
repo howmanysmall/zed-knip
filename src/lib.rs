@@ -355,8 +355,7 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 		if let Some(arguments) = binary.arguments {
 			reject_binary_arguments(&arguments)?;
 		}
-		// binary.env is intentionally not parsed: KNIP_LOG_LEVEL and KNIP_PACKAGE_MANAGER
-		// are no longer supported as env-based overrides.
+		// binary.env is intentionally not parsed; env-based overrides are unsupported.
 	}
 
 	if let Some(custom_settings) = settings.settings {
@@ -603,8 +602,8 @@ mod tests {
 				arguments: None,
 				// env is intentionally not parsed; these values are ignored
 				env: Some(HashMap::from([
-					("KNIP_PACKAGE_MANAGER".to_string(), "npm".to_string()),
-					("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
+					("IGNORED_PACKAGE_MANAGER".to_string(), "npm".to_string()),
+					("IGNORED_LOG_LEVEL".to_string(), "debug".to_string()),
 				])),
 			}),
 			initialization_options: None,
@@ -825,7 +824,7 @@ mod tests {
 		assert_eq!(
 			command.args,
 			vec!["--stdio".to_string()],
-			"args must be exactly ['--stdio']; --cwd and --config are initialization options, not launch args"
+			"args must be exactly ['--stdio']; workspace and config paths are initialization options, not launch args"
 		);
 		assert!(
 			command.env.is_empty(),
@@ -858,7 +857,6 @@ mod tests {
 
 	#[test]
 	fn language_server_configuration_includes_zed_knip_advanced_settings() {
-		// RED: zedKnip config bridge pending Task 2/3
 		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
 			binary: None,
 			initialization_options: None,
@@ -891,7 +889,6 @@ mod tests {
 
 	#[test]
 	fn settings_reject_removed_noop_settings() {
-		// RED: removed-setting rejection pending Task 2
 		let err = settings_from_lsp_settings(zed::settings::LspSettings {
 			binary: None,
 			initialization_options: None,

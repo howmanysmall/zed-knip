@@ -116,12 +116,12 @@ pub struct KnipSettings {
 	/// Internal: detected or overridden package manager for the workspace.
 	///
 	/// Not user-configurable via settings JSON.
-	/// Kept for resolver compatibility until Task 3.
+	/// Populated internally from workspace metadata before command resolution.
 	pub package_manager: Option<String>,
 	/// Internal: log level for the language server.
 	///
 	/// Not user-configurable via settings JSON.
-	/// Kept for resolver compatibility until Task 3.
+	/// Used internally when constructing resolver inputs.
 	pub log_level: LogLevel,
 }
 
@@ -249,7 +249,7 @@ impl KnipSettings {
 
 /// Knip language-server log levels.
 ///
-/// Kept for internal resolver compatibility until Task 3.
+/// Internal language-server log level representation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
 	Trace,
