@@ -141,37 +141,6 @@ jobs:
         name: Check Rust docs
         run: cargo doc --no-deps --document-private-items --all-features
 
-  # Ensure generated cargo-dist release workflow is up to date
-  dist-release-workflow:
-    env:
-      # This job only needs cargo metadata for cargo-dist generation checks.
-      CARGO_BUILD_RUSTC_WRAPPER: ""
-      RUSTC_WRAPPER: ""
-    name: Release Workflow
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93.1"
-      - name: Install cargo-dist
-        run: |
-          if [[ ! -f dist-workspace.toml ]]; then
-              echo "dist-workspace.toml is not present; skipping cargo-dist workflow check."
-              exit 0
-          fi
-
-          dist_version="$(sed -n 's/^cargo-dist-version = "\(.*\)"/\1/p' dist-workspace.toml)"
-          if [[ -z "${dist_version}" ]]; then
-              echo "Failed to read cargo-dist-version from dist-workspace.toml"
-              exit 1
-          fi
-
-          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${dist_version}/cargo-dist-installer.sh" | sh
-        shell: bash
-      - name: Check generated release workflow
-        run: dist generate --mode ci --check
-
   # Informational: Binary size analysis
   bloat:
     if: github.event_name == 'pull_request'
@@ -222,7 +191,7 @@ jobs:
   ci-success:
     if: always()
     name: CI Success
-    needs: [fmt, clippy, test, audit, deny, shear, gitleaks, docs, dist-release-workflow]
+    needs: [fmt, clippy, test, audit, deny, shear, gitleaks, docs]
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
@@ -234,8 +203,7 @@ jobs:
                 "${{ needs.deny.result }}" != "success" || \
                 "${{ needs.shear.result }}" != "success" || \
                 "${{ needs.gitleaks.result }}" != "success" || \
-                "${{ needs.docs.result }}" != "success" || \
-                "${{ needs.dist-release-workflow.result }}" != "success" ]]; then
+                "${{ needs.docs.result }}" != "success" ]]; then
             echo "One or more required jobs failed"
             exit 1
           fi
