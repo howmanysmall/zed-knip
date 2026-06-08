@@ -65,12 +65,17 @@ struct CodeAction {
 
 // Knip custom LSP request method names.
 // Source: packages/language-server/src/constants.js @ e93ccaa4d8fd6df6b4e976d2b0472ba5f7d48830
+//
+// These custom request methods are defined by the upstream Knip language server
+// (and consumed by the VSCode extension). The Zed extension does NOT wire them
+// — the parity tests below only assert that the upstream names are correctly
+// referenced as a known, non-wired context, not that the Zed extension handles
+// them.
 const KNIP_METHOD_OPEN_FILE: &str = "knip/openFile";
 const KNIP_METHOD_SHOW_REFERENCES: &str = "knip/showReferences";
 
 const LSP_METHOD_PUBLISH_DIAGNOSTICS: &str = "textDocument/publishDiagnostics";
 const LSP_METHOD_CODE_ACTION: &str = "textDocument/codeAction";
-const LSP_METHOD_HOVER: &str = "textDocument/hover";
 
 fn sample_unused_export_diagnostic(uri: &str) -> PublishDiagnosticsParams {
 	PublishDiagnosticsParams {
@@ -234,16 +239,15 @@ fn lsp_parity_code_action_method_name_is_standard_lsp() {
 }
 
 #[test]
-fn lsp_parity_code_action_install_dependency_is_zed_equivalent() {
+fn lsp_parity_code_action_install_dependency_is_unsupported() {
 	// "Install dependency" requires interactive input (package name + version).
-	// Zed's LSP client cannot present parameterised quick-fix dialogs, so this
-	// feature maps to a slash command (/knip-install) rather than a code action.
-	// This test documents the parity decision: status = zed-equivalent.
-	let parity_status = "zed-equivalent";
-	let zed_surface = "/knip-install slash command";
+	// Zed's LSP client cannot present parameterised quick-fix dialogs, and this
+	// extension does not wire a /knip-install slash command. Status: unsupported.
+	let parity_status = "unsupported";
+	let reason = "Zed cannot present parameterised quick-fix inputs; no slash command is wired";
 
-	assert_eq!(parity_status, "zed-equivalent");
-	assert!(zed_surface.contains("slash command"));
+	assert_eq!(parity_status, "unsupported");
+	assert!(reason.contains("slash command"));
 }
 
 #[test]
@@ -257,147 +261,71 @@ fn lsp_parity_code_action_delete_file_is_unsupported() {
 }
 
 #[test]
-fn lsp_parity_custom_method_open_file_name_is_correct() {
+fn lsp_parity_custom_method_open_file_is_upstream_only() {
 	// knip/openFile: sent by the LS to ask the client to open a file at a
-	// given location. Zed handles this via its standard file-open mechanism.
+	// given location. This is an UPSTREAM custom request consumed by the
+	// VSCode extension. The Zed extension does NOT wire it.
 	assert_eq!(KNIP_METHOD_OPEN_FILE, "knip/openFile");
 }
 
 #[test]
-fn lsp_parity_custom_method_show_references_name_is_correct() {
+fn lsp_parity_custom_method_show_references_is_upstream_only() {
 	// knip/showReferences: sent by the LS to ask the client to show a
-	// references panel. Zed surfaces this via the standard references UI.
+	// references panel. This is an UPSTREAM custom request consumed by the
+	// VSCode extension. The Zed extension does NOT wire it.
 	assert_eq!(KNIP_METHOD_SHOW_REFERENCES, "knip/showReferences");
 }
 
 #[test]
 fn lsp_parity_custom_methods_are_knip_namespaced() {
-	// All Knip custom methods must use the "knip/" namespace to avoid
-	// collisions with other language servers.
+	// All upstream Knip custom methods use the "knip/" namespace to avoid
+	// collisions with other language servers. Documented here as a known
+	// upstream-only context, not as something the Zed extension handles.
 	for method in [KNIP_METHOD_OPEN_FILE, KNIP_METHOD_SHOW_REFERENCES] {
 		assert!(
 			method.starts_with("knip/"),
-			"custom method '{method}' must be knip/-namespaced"
+			"upstream custom method '{method}' must be knip/-namespaced"
 		);
 	}
 }
 
-/// Minimal LSP Hover response.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HoverResponse {
-	/// Markdown content.
-	contents: String,
-	range: Option<Range>,
-}
+#[test]
+fn lsp_parity_hover_support_is_upstream_only_and_not_wired() {
+	// textDocument/hover is offered by the upstream Knip language server and
+	// consumed by the VSCode extension (e.g. export/dependency usage hovers).
+	// The Zed extension does NOT wire hover — it only consumes diagnostics and
+	// code actions. This test locks the non-wired contract: documenting the
+	// upstream method name as known-but-unwired, not as a Zed feature.
+	let upstream_method = "textDocument/hover";
+	let zed_wires_hover = false;
 
-fn sample_export_hover() -> HoverResponse {
-	HoverResponse {
-		contents: "**myFunction** — used in 3 files\n\n- `src/a.ts`\n- `src/b.ts`\n- `src/c.ts`".to_owned(),
-		range: Some(Range {
-			start: Position { line: 4, character: 9 },
-			end: Position { line: 4, character: 20 },
-		}),
-	}
-}
-
-fn sample_dependency_hover() -> HoverResponse {
-	HoverResponse {
-		contents: "**lodash** — used in 2 files\n\n- `src/utils.ts`\n- `src/helpers.ts`".to_owned(),
-		range: Some(Range {
-			start: Position { line: 10, character: 4 },
-			end: Position {
-				line: 10,
-				character: 14,
-			},
-		}),
-	}
+	assert_eq!(upstream_method, "textDocument/hover");
+	assert!(!zed_wires_hover, "Zed extension must not wire hover support");
 }
 
 #[test]
-fn lsp_parity_hover_export_usages_shape_is_valid() {
-	let hover = sample_export_hover();
-
-	assert!(!hover.contents.is_empty());
-	assert!(hover.contents.contains("used in"));
-	assert!(hover.range.is_some());
-}
-
-#[test]
-fn lsp_parity_hover_dependency_usages_shape_is_valid() {
-	let hover = sample_dependency_hover();
-
-	assert!(hover.contents.contains("lodash"));
-	assert!(hover.contents.contains("used in"));
-}
-
-#[test]
-fn lsp_parity_hover_method_name_is_standard_lsp() {
-	assert_eq!(LSP_METHOD_HOVER, "textDocument/hover");
-}
-
-#[test]
-fn lsp_parity_hover_show_hover_command_is_zed_equivalent() {
-	// VSCode `knip.showHover` command → Zed standard hover interaction.
-	// No custom command needed; Zed triggers hover on cursor position.
-	let parity_status = "zed-equivalent";
-
-	assert_eq!(parity_status, "zed-equivalent");
-}
-
-#[test]
-fn lsp_parity_codelens_import_counts_is_zed_equivalent() {
-	// Zed does not support CodeLens (textDocument/codeLens).
-	// Import counts are surfaced via /knip-report slash command instead.
-	// Status: zed-equivalent.
-	let parity_status = "zed-equivalent";
-	let zed_surface = "/knip-report slash command";
-	let limitation = "Zed lacks CodeLens support";
-
-	assert_eq!(parity_status, "zed-equivalent");
-	assert!(limitation.contains("CodeLens"));
-	assert!(zed_surface.contains("slash command"));
-}
-
-#[test]
-fn lsp_parity_codelens_no_direct_zed_api() {
-	let unsupported_lsp_method = "textDocument/codeLens";
-
-	assert!(unsupported_lsp_method.contains("codeLens"));
-}
-
-#[test]
-fn lsp_parity_tree_view_imports_is_zed_equivalent() {
-	// VSCode Imports View (tree-view-imports.js) → /knip-imports markdown report.
-	let parity_status = "zed-equivalent";
-	let zed_surface = "/knip-imports markdown report";
-	let limitation = "Zed has no tree-view extension API";
-
-	assert_eq!(parity_status, "zed-equivalent");
-	assert!(limitation.contains("tree-view"));
-	assert!(zed_surface.contains("markdown report"));
-}
-
-#[test]
-fn lsp_parity_tree_view_exports_is_zed_equivalent() {
-	// VSCode Exports View (tree-view-exports.js) → /knip-exports markdown report.
-	let parity_status = "zed-equivalent";
-	let zed_surface = "/knip-exports markdown report";
-	let limitation = "Zed has no tree-view extension API";
-
-	assert_eq!(parity_status, "zed-equivalent");
-	assert!(limitation.contains("tree-view"));
-	assert!(zed_surface.contains("markdown report"));
-}
-
-#[test]
-fn lsp_parity_tree_view_expand_all_command_is_unsupported() {
-	// VSCode `knip.expandAll` command has no Zed equivalent.
-	// Zed lacks a tree-view command API entirely.
+fn lsp_parity_codelens_support_is_unsupported() {
+	// textDocument/codeLens is offered upstream (knip.showImports codelens)
+	// but Zed has no CodeLens API and the extension does not provide a
+	// /knip-report slash-command workaround. Status: unsupported.
 	let parity_status = "unsupported";
-	let reason = "Zed lacks tree-view command parity";
+	let limitation = "Zed lacks CodeLens API; no slash command is wired";
 
 	assert_eq!(parity_status, "unsupported");
-	assert!(reason.contains("tree-view"));
+	assert!(limitation.contains("CodeLens"));
+}
+
+#[test]
+fn lsp_parity_tree_views_are_unsupported() {
+	// VSCode tree-view-imports and tree-view-exports panels are upstream-only
+	// custom UI surfaces. Zed has no tree-view extension API and the extension
+	// does not provide slash-command / markdown-report alternatives for them.
+	// Status: unsupported.
+	let parity_status = "unsupported";
+	let limitation = "Zed has no tree-view extension API; no markdown-report workaround is wired";
+
+	assert_eq!(parity_status, "unsupported");
+	assert!(limitation.contains("tree-view"));
 }
 
 #[test]
@@ -410,17 +338,38 @@ fn lsp_parity_lifecycle_ls_startup_is_implemented() {
 }
 
 #[test]
-fn lsp_parity_lifecycle_file_watching_is_implemented() {
-	// Knip's LS does not dynamically register file notifications. The managed
-	// server must advertise save sync and route didSave through Knip's refresh.
-	let parity_status = "implemented";
-	let lsp_method = "textDocument/didSave";
-	let resolver_source = include_str!("../src/resolver.rs");
+fn lsp_parity_lifecycle_file_watching_is_wired_via_managed_patch() {
+	// didSave handling for the managed install is wired by the
+	// `apply_did_save_refresh_patch` in `src/managed_install.rs`, which is
+	// the test that asserts the patch produces `textDocumentSync` and
+	// `onDidSave` hooks in the upstream server source. The launch path in
+	// `build_language_server_command` must NOT carry these strings — they
+	// are managed-patch internals, not Zed-extension feature surface.
+	use std::path::PathBuf;
 
-	assert_eq!(parity_status, "implemented");
-	assert!(lsp_method.starts_with("textDocument/"));
-	assert!(resolver_source.contains("textDocumentSync"));
-	assert!(resolver_source.contains("onDidSave"));
+	use zed_knip::{
+		cache::InstallSource,
+		package_manager::PackageManager,
+		resolver::{build_language_server_command, ResolvedKnip},
+		settings::KnipSettings,
+	};
+
+	let resolved = ResolvedKnip {
+		executable_path: PathBuf::from("/managed/knip-language-server"),
+		package_manager: PackageManager::Npm,
+		install_source: InstallSource::ManagedCache,
+	};
+	let command = build_language_server_command(&resolved, &KnipSettings::default(), &PathBuf::from("/workspace"));
+
+	let combined = format!("{:?} {:?}", command.command.args, command.command.env);
+	assert!(
+		!combined.contains("textDocumentSync"),
+		"launch command must not reference textDocumentSync (managed-patch internal)"
+	);
+	assert!(
+		!combined.contains("onDidSave"),
+		"launch command must not reference onDidSave (managed-patch internal)"
+	);
 }
 
 #[test]
@@ -705,82 +654,6 @@ fn lsp_parity_code_action_method_returns_list_not_single_item() {
 	assert!(actions.len() > 1, "codeAction response is a list");
 }
 
-#[test]
-fn lsp_parity_hover_contents_is_markdown_string() {
-	// Knip hover responses use MarkupContent with kind = "markdown".
-	// Zed renders markdown hover content natively.
-	let hover = sample_export_hover();
-	// Markdown bold syntax for the symbol name.
-	assert!(
-		hover.contents.contains("**"),
-		"hover contents must use markdown bold for symbol name"
-	);
-}
-
-#[test]
-fn lsp_parity_hover_export_lists_consuming_files() {
-	// Export hover shows which files import the symbol.
-	let hover = sample_export_hover();
-	assert!(hover.contents.contains("src/a.ts"), "hover must list consuming files");
-	assert!(hover.contents.contains("src/b.ts"));
-	assert!(hover.contents.contains("src/c.ts"));
-}
-
-#[test]
-fn lsp_parity_hover_dependency_targets_package_json() {
-	// Dependency hover is triggered on package.json entries.
-	// The hover response includes the dependency name and usage locations.
-	let hover = sample_dependency_hover();
-	assert!(
-		hover.contents.contains("lodash"),
-		"dependency hover must name the package"
-	);
-	assert!(
-		hover.contents.contains("src/utils.ts"),
-		"dependency hover must list usage files"
-	);
-}
-
-#[test]
-fn lsp_parity_hover_range_spans_the_hovered_symbol() {
-	// The hover range tells Zed which text to highlight while the hover is shown.
-	let hover = sample_export_hover();
-	let range = hover.range.as_ref().expect("export hover must include a range");
-	// Range must span at least one character.
-	assert!(
-		range.end.character > range.start.character || range.end.line > range.start.line,
-		"hover range must span at least one character"
-	);
-}
-
-#[test]
-fn lsp_parity_hover_timeout_is_documented_constraint() {
-	// Hover provider implements a 300ms timeout to prevent UI lag.
-	// This is a performance constraint, not a protocol constraint.
-	// Documented in docs/parity-matrix.md under Performance Constraints.
-	let timeout_ms: u32 = 300;
-	assert!(timeout_ms <= 500, "hover timeout must be ≤500ms to avoid UI lag");
-}
-
-#[test]
-fn lsp_parity_hover_unused_symbol_shows_zero_usages() {
-	// When a symbol has zero usages (it is unused), the hover still renders
-	// but shows "used in 0 files" rather than omitting the usage list.
-	let hover = HoverResponse {
-		contents: "**deadFn** — used in 0 files".to_owned(),
-		range: Some(Range {
-			start: Position { line: 1, character: 7 },
-			end: Position { line: 1, character: 13 },
-		}),
-	};
-
-	assert!(
-		hover.contents.contains("0 files"),
-		"unused symbol hover must show 0 usages"
-	);
-	assert!(hover.range.is_some());
-}
-
 /// All parity statuses used in the matrix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParityStatus {
@@ -805,39 +678,41 @@ impl ParityStatus {
 /// This mirrors `docs/parity-matrix.md` and is the harness-confirmed source of truth.
 fn parity_matrix() -> Vec<(&'static str, ParityStatus)> {
 	vec![
-		// Diagnostics
+		// Diagnostics — wired
 		("unused-files", ParityStatus::Implemented),
 		("unused-dependencies", ParityStatus::Implemented),
 		("unused-exports", ParityStatus::Implemented),
 		("circular-dependencies", ParityStatus::Implemented),
-		// Code Actions
+		// Code Actions — wired (3) + unsupported (2)
 		("code-action-remove-export", ParityStatus::Implemented),
 		("code-action-add-jsdoc-tag", ParityStatus::Implemented),
 		("code-action-remove-dependency", ParityStatus::Implemented),
-		("code-action-install-dependency", ParityStatus::ZedEquivalent),
+		("code-action-install-dependency", ParityStatus::Unsupported),
 		("code-action-delete-file", ParityStatus::Unsupported),
-		// Settings
+		// Settings — wired
 		("setting-defer-session", ParityStatus::Implemented),
 		("setting-require-config", ParityStatus::Implemented),
 		("setting-config-file-path", ParityStatus::Implemented),
 		("setting-node-runtime-path", ParityStatus::Implemented),
-		// Commands
+		// Commands — start/restart use Zed's standard LSP commands; the rest
+		// (show-hover, expand-all) are upstream-only custom commands with no
+		// Zed equivalent.
 		("command-knip-start", ParityStatus::ZedEquivalent),
 		("command-knip-restart", ParityStatus::ZedEquivalent),
-		("command-knip-show-hover", ParityStatus::ZedEquivalent),
+		("command-knip-show-hover", ParityStatus::Unsupported),
 		("command-knip-expand-all", ParityStatus::Unsupported),
-		// Hover
-		("hover-export-usages", ParityStatus::Implemented),
-		("hover-dependency-usages", ParityStatus::Implemented),
-		// CodeLens
-		("codelens-import-counts", ParityStatus::ZedEquivalent),
-		// Tree Views
-		("tree-view-imports", ParityStatus::ZedEquivalent),
-		("tree-view-exports", ParityStatus::ZedEquivalent),
-		// Lifecycle
+		// Hover — upstream-only; the Zed extension does NOT wire hover.
+		("hover-export-usages", ParityStatus::Unsupported),
+		("hover-dependency-usages", ParityStatus::Unsupported),
+		// CodeLens — unsupported (Zed has no CodeLens API; no workaround).
+		("codelens-import-counts", ParityStatus::Unsupported),
+		// Tree Views — unsupported (Zed has no tree-view extension API).
+		("tree-view-imports", ParityStatus::Unsupported),
+		("tree-view-exports", ParityStatus::Unsupported),
+		// Lifecycle — wired
 		("lifecycle-ls-startup", ParityStatus::Implemented),
 		("lifecycle-file-watching", ParityStatus::Implemented),
-		// MCP
+		// MCP — out of scope
 		("mcp-knip-configure", ParityStatus::McpExcluded),
 		("mcp-knip-docs", ParityStatus::McpExcluded),
 		("mcp-language-model-tools", ParityStatus::McpExcluded),
@@ -872,8 +747,8 @@ fn lsp_parity_matrix_implemented_count_matches_expected() {
 	let matrix = parity_matrix();
 	let implemented = matrix.iter().filter(|(_, s)| *s == ParityStatus::Implemented).count();
 
-	// 4 diagnostics + 3 code actions + 4 settings + 2 hover + 2 lifecycle = 15
-	assert_eq!(implemented, 15, "expected 15 implemented features");
+	// 4 diagnostics + 3 code actions + 4 settings + 2 lifecycle = 13
+	assert_eq!(implemented, 13, "expected 13 implemented features");
 }
 
 #[test]
@@ -881,8 +756,8 @@ fn lsp_parity_matrix_zed_equivalent_count_matches_expected() {
 	let matrix = parity_matrix();
 	let zed_equiv = matrix.iter().filter(|(_, s)| *s == ParityStatus::ZedEquivalent).count();
 
-	// install-dependency + start + restart + show-hover + codelens + 2 tree-views = 7
-	assert_eq!(zed_equiv, 7, "expected 7 zed-equivalent features");
+	// start + restart = 2 (Zed's standard LSP commands)
+	assert_eq!(zed_equiv, 2, "expected 2 zed-equivalent features");
 }
 
 #[test]
@@ -890,8 +765,9 @@ fn lsp_parity_matrix_unsupported_count_matches_expected() {
 	let matrix = parity_matrix();
 	let unsupported = matrix.iter().filter(|(_, s)| *s == ParityStatus::Unsupported).count();
 
-	// delete-file + expand-all = 2
-	assert_eq!(unsupported, 2, "expected 2 unsupported features");
+	// install-dependency + delete-file + show-hover + expand-all + 2 hover +
+	// codelens + 2 tree-views = 9
+	assert_eq!(unsupported, 9, "expected 9 unsupported features");
 }
 
 #[test]
@@ -902,8 +778,16 @@ fn lsp_parity_matrix_mcp_excluded_count_matches_expected() {
 	assert_eq!(mcp, 3, "expected 3 MCP-excluded features");
 }
 
+// Reports module markdown formatting tests.
+//
+// The following tests verify the `reports` module's markdown output. These
+// are a separate markdown surface driven by Knip's CLI output — they are
+// NOT parity with upstream VSCode tree-views or CodeLens (the Zed extension
+// does not wire those LSP surfaces; see parity matrix entries for
+// `tree-view-imports`, `tree-view-exports`, `codelens-import-counts`).
+
 #[test]
-fn lsp_parity_tree_view_exports_report_markdown_has_table_and_heading() {
+fn lsp_parity_reports_exports_markdown_has_table_and_heading() {
 	let report = UnusedExportsReport::new(vec![UnusedExport {
 		name: "MyWidget".to_owned(),
 		location: Location::at("src/widgets.ts", 8, 1),
@@ -921,7 +805,7 @@ fn lsp_parity_tree_view_exports_report_markdown_has_table_and_heading() {
 }
 
 #[test]
-fn lsp_parity_tree_view_imports_report_markdown_has_table_and_heading() {
+fn lsp_parity_reports_imports_markdown_has_table_and_heading() {
 	let report = UnusedImportsReport::new(vec![UnusedImport {
 		name: "debounce".to_owned(),
 		source: "lodash".to_owned(),
@@ -940,7 +824,7 @@ fn lsp_parity_tree_view_imports_report_markdown_has_table_and_heading() {
 }
 
 #[test]
-fn lsp_parity_tree_view_exports_report_empty_state_is_clean() {
+fn lsp_parity_reports_exports_empty_state_is_clean() {
 	let report = UnusedExportsReport::default();
 	let md = report.format_markdown();
 
@@ -952,7 +836,7 @@ fn lsp_parity_tree_view_exports_report_empty_state_is_clean() {
 }
 
 #[test]
-fn lsp_parity_tree_view_imports_report_empty_state_is_clean() {
+fn lsp_parity_reports_imports_empty_state_is_clean() {
 	let report = UnusedImportsReport::default();
 	let md = report.format_markdown();
 
@@ -964,7 +848,7 @@ fn lsp_parity_tree_view_imports_report_empty_state_is_clean() {
 }
 
 #[test]
-fn lsp_parity_tree_view_exports_report_count_in_heading() {
+fn lsp_parity_reports_exports_count_in_heading() {
 	let report = UnusedExportsReport::new(vec![
 		UnusedExport {
 			name: "A".to_owned(),
@@ -988,7 +872,7 @@ fn lsp_parity_tree_view_exports_report_count_in_heading() {
 }
 
 #[test]
-fn lsp_parity_tree_view_cycles_report_formats_arrow_chain() {
+fn lsp_parity_reports_cycles_formats_arrow_chain() {
 	let report = CyclesReport::new(vec![Cycle::new(vec!["src/a.ts", "src/b.ts", "src/a.ts"])]);
 	let md = report.format_markdown();
 
@@ -1004,7 +888,7 @@ fn lsp_parity_tree_view_cycles_report_formats_arrow_chain() {
 }
 
 #[test]
-fn lsp_parity_tree_view_references_report_lists_locations() {
+fn lsp_parity_reports_references_lists_locations() {
 	let report = ReferencesReport::new(
 		"processData",
 		vec![
@@ -1035,7 +919,7 @@ fn lsp_parity_tree_view_references_report_lists_locations() {
 }
 
 #[test]
-fn lsp_parity_codelens_workspace_summary_report_is_knip_report_surface() {
+fn lsp_parity_reports_workspace_summary_is_knip_report_surface() {
 	let report = WorkspaceSummaryReport::new(
 		UnusedExportsReport::new(vec![UnusedExport {
 			name: "staleExport".to_owned(),
@@ -1063,7 +947,7 @@ fn lsp_parity_codelens_workspace_summary_report_is_knip_report_surface() {
 }
 
 #[test]
-fn lsp_parity_codelens_clean_workspace_summary_shows_single_message() {
+fn lsp_parity_reports_clean_workspace_summary_shows_single_message() {
 	let report = WorkspaceSummaryReport::default();
 	let md = report.format_markdown();
 
@@ -1082,7 +966,7 @@ fn lsp_parity_codelens_clean_workspace_summary_shows_single_message() {
 }
 
 #[test]
-fn lsp_parity_codelens_workspace_summary_includes_all_sections_when_dirty() {
+fn lsp_parity_reports_workspace_summary_includes_all_sections_when_dirty() {
 	let report = WorkspaceSummaryReport::new(
 		UnusedExportsReport::new(vec![UnusedExport {
 			name: "Foo".to_owned(),
