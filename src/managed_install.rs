@@ -19,6 +19,7 @@ const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
 const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
 const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
 pub(crate) const DID_SAVE_REFRESH_PATCH_MARKER: &str = "zed-knip: refresh Knip diagnostics on textDocument/didSave";
+pub(crate) const EDITOR_WORKFLOW_PATCH_MARKER: &str = "zed-knip: editor workflow patch";
 const DEFAULT_MANAGED_VERSION: &str = "latest";
 
 /// Resolves or installs a managed Knip language-server binary for a workspace.
@@ -88,16 +89,28 @@ pub(crate) fn patch_managed_language_server(executable_path: &Path) -> Result<()
 	let source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
 		reason: format!("failed to read managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
 	})?;
-	let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
-		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
-	})?
-	else {
-		return Ok(());
-	};
 
-	fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
-		reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
-	})
+	let (did_save_applied, after_did_save) =
+		match apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+			reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+		})? {
+			Some(patched) => (true, patched),
+			None => (false, source),
+		};
+
+	match apply_editor_workflow_patch(&after_did_save).map_err(|reason| KnipError::FailedManagedInstall {
+		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+	})? {
+		Some(patched) => fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
+			reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+		}),
+		None if did_save_applied => {
+			fs::write(&server_path, after_did_save).map_err(|error| KnipError::FailedManagedInstall {
+				reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+			})
+		}
+		None => Ok(()),
+	}
 }
 
 fn managed_language_server_server_path(executable_path: &Path) -> Result<PathBuf, KnipError> {
@@ -138,6 +151,32 @@ pub(crate) fn apply_did_save_refresh_patch(source: &str) -> Result<Option<String
 			"this.documents.listen(this.connection);\n    // {DID_SAVE_REFRESH_PATCH_MARKER}\n    this.documents.onDidSave(event => {{\n      void this.handleFileChanges({{ changes: [{{ uri: event.document.uri, type: FileChangeType.Changed }}] }});\n    }});\n    this.connection.listen();"
 		),
 		"document save listener",
+	)?;
+
+	Ok(Some(patched))
+}
+
+pub(crate) fn apply_editor_workflow_patch(source: &str) -> Result<Option<String>, String> {
+	if source.contains(EDITOR_WORKFLOW_PATCH_MARKER) {
+		return Ok(None);
+	}
+
+	let patched = replace_once(
+		source,
+		"args: { config: configFilePath }",
+		"args: { config: configFilePath, ...(config?.zedKnip?.tsConfigFilePath ? { tsConfig: path.resolve(this.cwd ?? process.cwd(), config.zedKnip.tsConfigFilePath) } : {}) }",
+		"createOptions editor-workflow",
+	)?;
+
+	let diag_replacement = format!(
+		"          const document = this.documents.get(uri);\n          // {EDITOR_WORKFLOW_PATCH_MARKER}\n          if (config?.zedKnip?.diagnostics) {{\n            const _d = config.zedKnip.diagnostics;\n            const _inc = _d.includeIssueTypes ?? [];\n            const _exc = _d.excludeIssueTypes ?? [];\n            const _pfx = _d.excludePathPrefixes ?? [];\n            const _sev = _d.severityByIssueType ?? {{}};\n            if (_inc.length > 0 && !_inc.includes(issue.type)) continue;\n            if (_exc.includes(issue.type)) continue;\n            if (_pfx.length > 0) {{\n              const _rel = path.relative(this.cwd ?? process.cwd(), issue.filePath).split(path.sep).join('/');\n              if (_pfx.some(p => _rel === p || _rel.startsWith(p + '/'))) continue;\n            }}\n            if (_sev[issue.type] === 'off') continue;\n          }}\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);"
+	);
+
+	let patched = replace_once(
+		&patched,
+		"          const document = this.documents.get(uri);\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);",
+		&diag_replacement,
+		"buildDiagnostics editor-workflow",
 	)?;
 
 	Ok(Some(patched))
@@ -800,5 +839,109 @@ mod tests {
 		assert!(cache_dir.starts_with(workspace.cache_root()));
 		assert!(other_cache_dir.starts_with(workspace.cache_root()));
 		assert_ne!(cache_dir, other_cache_dir);
+	}
+
+	const EDITOR_WORKFLOW_SOURCE: &str = concat!(
+		"import path from 'node:path';\n",
+		"buildDiagnostics(issues, config, rules) {\n",
+		"  for (const issue of Object.values(issuesForFile)) {\n",
+		"          const document = this.documents.get(uri);\n",
+		"          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n",
+		"  }\n",
+		"}\n",
+		"const options = await knip.createOptions({ cwd: this.cwd, isSession: true, args: { config: configFilePath } });\n",
+	);
+
+	#[test]
+	fn managed_patch_adds_editor_workflow_support() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"patched source must contain the editor-workflow marker"
+		);
+		assert!(patched.contains("tsConfig"), "patched source must reference tsConfig");
+		assert!(patched.contains("zedKnip"), "patched source must reference zedKnip");
+		assert!(
+			patched.contains("includeIssueTypes"),
+			"patched source must contain includeIssueTypes filter"
+		);
+		assert!(
+			patched.contains("excludeIssueTypes"),
+			"patched source must contain excludeIssueTypes filter"
+		);
+		assert!(
+			patched.contains("excludePathPrefixes"),
+			"patched source must contain excludePathPrefixes filter"
+		);
+		assert!(
+			patched.contains("severityByIssueType"),
+			"patched source must contain severityByIssueType filter"
+		);
+		assert!(patched.contains("'off'"), "patched source must handle 'off' severity");
+	}
+
+	#[test]
+	fn managed_patch_is_idempotent() {
+		let first = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("first application should not error")
+			.expect("first application should return Some");
+
+		let second = apply_editor_workflow_patch(&first).expect("second application should not error");
+
+		assert!(
+			second.is_none(),
+			"second application must return None (idempotent); source already contains editor-workflow marker"
+		);
+	}
+
+	#[test]
+	fn managed_patch_upgrades_old_marker_only() {
+		let source = concat!(
+			"import path from 'node:path';\n",
+			"// zed-knip: refresh Knip diagnostics on textDocument/didSave\n",
+			"// (did-save patch content)\n",
+			"          const document = this.documents.get(uri);\n",
+			"          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n",
+			"args: { config: configFilePath }\n",
+		);
+
+		assert!(
+			source.contains(DID_SAVE_REFRESH_PATCH_MARKER),
+			"test source must contain the did-save marker"
+		);
+		assert!(
+			!source.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"test source must NOT contain the editor-workflow marker"
+		);
+
+		let result =
+			apply_editor_workflow_patch(source).expect("should not error on source with only old did-save marker");
+		let patched = result.expect("should apply editor-workflow patch to old-marker-only source");
+
+		assert!(
+			patched.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"upgraded source must contain the editor-workflow marker"
+		);
+		assert!(
+			patched.contains(DID_SAVE_REFRESH_PATCH_MARKER),
+			"upgraded source must still contain the original did-save marker"
+		);
+	}
+
+	#[test]
+	fn managed_patch_reports_missing_editor_anchor() {
+		let source = "// source with no editor-workflow patch anchors\n";
+
+		let result = apply_editor_workflow_patch(source);
+
+		assert!(result.is_err(), "expected Err when a patch anchor is missing");
+		let err = result.unwrap_err();
+		assert!(
+			err.contains("editor-workflow"),
+			"error message must name the editor-workflow anchor; got: {err}"
+		);
 	}
 }
