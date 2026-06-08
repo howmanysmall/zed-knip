@@ -647,6 +647,21 @@ mod tests {
 		);
 		assert_eq!(options["cwd"].as_str(), Some(expected_cwd.as_str()));
 		assert_eq!(options["config"]["editor"]["exports"]["quickfix"]["enabled"], true);
+
+		let config_file_path_str = options["config"]["configFilePath"].as_str().unwrap();
+		assert!(
+			Path::new(config_file_path_str).is_absolute(),
+			"configFilePath must be an absolute path, got: {config_file_path_str}"
+		);
+		let cwd_str = options["cwd"].as_str().unwrap();
+		assert!(
+			Path::new(cwd_str).is_absolute(),
+			"cwd must be an absolute path, got: {cwd_str}"
+		);
+		assert!(
+			options["config"].get("zedKnip").is_none(),
+			"config must not contain 'zedKnip' key for baseline settings"
+		);
 	}
 
 	#[test]
@@ -680,5 +695,119 @@ mod tests {
 		let error = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap_err();
 
 		assert!(error.contains("This workspace is not supported: missing package.json"));
+	}
+
+	#[test]
+	fn language_server_command_uses_stdio_only() {
+		let worktree = TestWorktree::new("stdio-only");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio']; --cwd and --config are initialization options, not launch args"
+		);
+		assert!(
+			command.env.is_empty(),
+			"env must be empty; cwd/config/package-manager are initialization options, not env vars"
+		);
+	}
+
+	#[test]
+	fn language_server_command_rejects_non_transport_arguments() {
+		let error = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: Some(vec!["--tsConfig".to_string(), "tsconfig.app.json".to_string()]),
+				env: None,
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+
+		assert!(
+			error.contains("--tsConfig"),
+			"rejection error must name the unsupported argument '--tsConfig', got: {error}"
+		);
+		assert!(
+			error.contains("`lsp.knip.binary.arguments` is not supported"),
+			"rejection error must name the unsupported config key, got: {error}"
+		);
+	}
+
+	#[test]
+	fn language_server_configuration_includes_zed_knip_advanced_settings() {
+		// RED: zedKnip config bridge pending Task 2/3
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"ts_config_path": "tsconfig.app.json",
+				"diagnostics": { "include": ["exports"] }
+			})),
+		})
+		.unwrap();
+
+		let workspace_root = std::path::Path::new("/workspace");
+		let config = knip_workspace_configuration(&settings);
+		let init_options = knip_initialization_options(&settings, workspace_root);
+
+		assert_eq!(
+			config["zedKnip"]["tsConfigFilePath"].as_str(),
+			Some("tsconfig.app.json"),
+			"workspace configuration must include zedKnip.tsConfigFilePath"
+		);
+		assert!(
+			config["zedKnip"]["diagnostics"].is_object(),
+			"workspace configuration must include zedKnip.diagnostics object"
+		);
+		assert_eq!(
+			init_options["config"]["zedKnip"]["tsConfigFilePath"].as_str(),
+			Some("tsconfig.app.json"),
+			"initialization options must include config.zedKnip.tsConfigFilePath"
+		);
+	}
+
+	#[test]
+	fn settings_reject_removed_noop_settings() {
+		// RED: removed-setting rejection pending Task 2
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"server_path": "x"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("server_path"),
+			"error must name the removed key 'server_path', got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"log_level": "info"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("log_level"),
+			"error must name the removed key 'log_level', got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"package_manager": "npm"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("package_manager"),
+			"error must name the removed key 'package_manager', got: {err}"
+		);
 	}
 }
