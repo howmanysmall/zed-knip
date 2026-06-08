@@ -102,12 +102,12 @@ fn perf_command_builder_documents_single_language_server_process_per_worktree() 
 		"resolver must keep command construction centralized"
 	);
 	assert!(
-		RESOLVER_SOURCE.contains("--cwd"),
-		"command builder must pass one worktree cwd instead of per-file launches"
+		RESOLVER_SOURCE.contains("working_dir"),
+		"command builder must use working_dir for worktree identity instead of per-file launches"
 	);
 	assert!(
-		RESOLVER_SOURCE.contains("KNIP_WORKSPACE_ROOT"),
-		"command builder must carry one worktree root in process env"
+		!RESOLVER_SOURCE.contains("--cwd"),
+		"command builder must not pass --cwd as a launch arg"
 	);
 }
 

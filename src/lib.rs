@@ -681,20 +681,14 @@ mod tests {
 		let worktree = TestWorktree::new("command");
 		worktree.write("package.json", "{\"packageManager\":\"pnpm@9.0.0\"}\n");
 		let executable = worktree.executable("node_modules/.bin/knip-language-server");
-		let config = worktree.write("knip.json", "{}\n");
+		worktree.write("knip.json", "{}\n");
 
 		let command =
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert_eq!(command.args[0], "--stdio");
-		assert!(command.args.contains(&"--cwd".to_string()));
-		assert!(command.args.contains(&worktree.root.display().to_string()));
-		assert!(command.args.contains(&"--config".to_string()));
-		assert!(command.args.contains(&config.display().to_string()));
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "pnpm".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]
@@ -707,9 +701,8 @@ mod tests {
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "bun".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]
@@ -723,9 +716,8 @@ mod tests {
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "aube".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]

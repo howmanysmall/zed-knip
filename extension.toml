@@ -20,4 +20,4 @@ TSX = "typescriptreact"
 [[capabilities]]
 kind = "process:exec"
 command = "**/knip-language-server"
-args = ["--stdio", "--cwd", "**"]
+args = ["--stdio"]
