@@ -1156,6 +1156,33 @@ mod tests {
 	}
 
 	#[test]
+	fn ts_config_path_rejects_missing_file() {
+		let worktree = TestWorktree::new("ts-config-path-missing-file");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			ts_config_path: Some("missing/tsconfig.app.json".to_string()),
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("ts_config_path"),
+			"error must mention ts_config_path, got: {error}"
+		);
+		let expected = worktree.root.join("missing/tsconfig.app.json").display().to_string();
+		assert!(
+			error.contains(&expected),
+			"error must mention the resolved path '{expected}', got: {error}"
+		);
+		assert!(
+			error.contains("file not found") || error.contains("not found"),
+			"error must explain the file is missing, got: {error}"
+		);
+	}
+
+	#[test]
 	fn custom_binary_path_supports_baseline_stdio_launch() {
 		let worktree = TestWorktree::new("custom-baseline-stdio");
 		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
