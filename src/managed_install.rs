@@ -169,7 +169,7 @@ pub(crate) fn apply_editor_workflow_patch(source: &str) -> Result<Option<String>
 	)?;
 
 	let diag_replacement = format!(
-		"          const document = this.documents.get(uri);\n          // {EDITOR_WORKFLOW_PATCH_MARKER}\n          if (config?.zedKnip?.diagnostics) {{\n            const _d = config.zedKnip.diagnostics;\n            const _inc = _d.includeIssueTypes ?? [];\n            const _exc = _d.excludeIssueTypes ?? [];\n            const _pfx = _d.excludePathPrefixes ?? [];\n            const _sev = _d.severityByIssueType ?? {{}};\n            if (_inc.length > 0 && !_inc.includes(issue.type)) continue;\n            if (_exc.includes(issue.type)) continue;\n            if (_pfx.length > 0) {{\n              const _rel = path.relative(this.cwd ?? process.cwd(), issue.filePath).split(path.sep).join('/');\n              if (_pfx.some(p => _rel === p || _rel.startsWith(p + '/'))) continue;\n            }}\n            if (_sev[issue.type] === 'off') continue;\n          }}\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);"
+		"          const document = this.documents.get(uri);\n          // {EDITOR_WORKFLOW_PATCH_MARKER}\n          if (config?.zedKnip?.diagnostics) {{\n            const _d = config.zedKnip.diagnostics;\n            const _inc = _d.includeIssueTypes ?? [];\n            const _exc = _d.excludeIssueTypes ?? [];\n            const _pfx = _d.excludePathPrefixes ?? [];\n            const _sev = _d.severityByIssueType ?? {{}};\n            if (_inc.length > 0 && !_inc.includes(issue.type)) continue;\n            if (_exc.includes(issue.type)) continue;\n            if (_pfx.length > 0) {{\n              const _rel = path.relative(this.cwd ?? process.cwd(), issue.filePath).split(path.sep).join('/');\n              if (_pfx.some(p => _rel === p || _rel.startsWith(p + '/'))) continue;\n            }}\n            if (_sev[issue.type] === 'off') continue;\n          }}\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n          if (config?.zedKnip?.diagnostics) {{\n            const _s = (config.zedKnip.diagnostics.severityByIssueType ?? {{}})[issue.type];\n            if (_s && _s !== 'off') {{\n              const _map = {{ error: 1, warn: 2, info: 3, hint: 4 }};\n              if (_map[_s] !== undefined) diagnostic.severity = _map[_s];\n            }}\n          }}"
 	);
 
 	let patched = replace_once(
@@ -881,6 +881,26 @@ mod tests {
 			"patched source must contain severityByIssueType filter"
 		);
 		assert!(patched.contains("'off'"), "patched source must handle 'off' severity");
+		assert!(
+			patched.contains("diagnostic.severity"),
+			"patched source must override diagnostic.severity based on severityByIssueType"
+		);
+	}
+
+	#[test]
+	fn managed_patch_severity_overrides_lsp_diagnostic_severity() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains("diagnostic.severity = _map[_s]"),
+			"patched source must assign diagnostic.severity from the severity map"
+		);
+		assert!(
+			patched.contains("error: 1, warn: 2, info: 3, hint: 4"),
+			"patched source must map error=1, warn=2, info=3, hint=4 to LSP DiagnosticSeverity"
+		);
 	}
 
 	#[test]

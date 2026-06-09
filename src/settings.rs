@@ -312,6 +312,11 @@ pub enum KnipSettingsError {
 	InvalidSeverityValue { issue_type: String, value: String },
 	/// An invalid diagnostics path prefix was provided.
 	InvalidPathPrefix { reason: String },
+	/// A removed env-based setting was used; names the env key and replacement.
+	RemovedEnvSetting {
+		name: &'static str,
+		replacement: &'static str,
+	},
 }
 
 impl fmt::Display for KnipSettingsError {
@@ -343,6 +348,12 @@ impl fmt::Display for KnipSettingsError {
 			}
 			Self::InvalidPathPrefix { reason } => {
 				write!(f, "Invalid diagnostic path prefix: {reason}")
+			}
+			Self::RemovedEnvSetting { name, replacement } => {
+				write!(
+					f,
+					"Removed env-based setting 'lsp.knip.binary.env.{name}'. The Knip language server does not consume this env var. Use '{replacement}' (and other LSP settings) instead."
+				)
 			}
 		}
 	}

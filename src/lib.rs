@@ -17,7 +17,10 @@ use crate::{
 	resolver::{build_language_server_command, resolve_knip},
 	settings::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError},
 };
-use std::path::{Component, PathBuf};
+use std::{
+	collections::HashMap,
+	path::{Component, PathBuf},
+};
 use zed_extension_api as zed;
 
 const KNIP_LANGUAGE_SERVER_ID: &str = "knip";
@@ -260,6 +263,11 @@ fn settings_for_worktree(
 		.to_string());
 	}
 
+	if let Some(config_path) = settings.config_path.as_deref() {
+		let resolved = validate_config_path(config_path, &workspace_root).map_err(|error| error.to_string())?;
+		settings.config_path = Some(resolved.display().to_string());
+	}
+
 	if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
 		validate_ts_config_path(ts_config_path, &workspace_root)?;
 	}
@@ -270,6 +278,27 @@ fn settings_for_worktree(
 
 	settings.validate().map_err(|error| error.to_string())?;
 	Ok(settings)
+}
+
+fn validate_config_path(config_path: &str, workspace_root: &std::path::Path) -> Result<PathBuf, KnipError> {
+	let path = std::path::Path::new(config_path);
+	let resolved = if path.is_absolute() {
+		path.to_path_buf()
+	} else {
+		workspace_root.join(path)
+	};
+
+	if !resolved.is_file() {
+		return Err(KnipError::InvalidConfig {
+			path: resolved.clone(),
+			reason: format!(
+				"lsp.knip.settings.config_path points at {} but no file exists at that path",
+				resolved.display()
+			),
+		});
+	}
+
+	Ok(resolved)
 }
 
 fn validate_ts_config_path(ts_config_path: &str, workspace_root: &std::path::Path) -> zed::Result<()> {
@@ -355,7 +384,9 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 		if let Some(arguments) = binary.arguments {
 			reject_binary_arguments(&arguments)?;
 		}
-		// binary.env is intentionally not parsed; env-based overrides are unsupported.
+		if let Some(env) = binary.env.as_ref() {
+			reject_binary_env_settings(env)?;
+		}
 	}
 
 	if let Some(custom_settings) = settings.settings {
@@ -461,6 +492,21 @@ fn reject_binary_arguments(arguments: &[String]) -> zed::Result<()> {
 			.collect::<Vec<_>>()
 			.join(", ")
 	))
+}
+
+fn reject_binary_env_settings(env: &HashMap<String, String>) -> zed::Result<()> {
+	const REMOVED_ENV_KEYS: &[(&str, &str)] = &[
+		("KNIP_LOG_LEVEL", "lsp.knip.settings.log_level"),
+		("KNIP_PACKAGE_MANAGER", "the packageManager field in package.json"),
+	];
+
+	for (name, replacement) in REMOVED_ENV_KEYS {
+		if env.contains_key(*name) {
+			return Err(KnipSettingsError::RemovedEnvSetting { name, replacement }.to_string());
+		}
+	}
+
+	Ok(())
 }
 
 fn unsupported_language_server_error(language_server_id: &str) -> String {
@@ -600,11 +646,10 @@ mod tests {
 			binary: Some(zed::settings::CommandSettings {
 				path: Some("tools/knip-language-server".to_string()),
 				arguments: None,
-				// env is intentionally not parsed; these values are ignored
-				env: Some(HashMap::from([
-					("IGNORED_PACKAGE_MANAGER".to_string(), "npm".to_string()),
-					("IGNORED_LOG_LEVEL".to_string(), "debug".to_string()),
-				])),
+				env: Some(HashMap::from([(
+					"UNRELATED_ENV_VAR".to_string(),
+					"ignored".to_string(),
+				)])),
 			}),
 			initialization_options: None,
 			settings: Some(zed::serde_json::json!({
@@ -628,6 +673,65 @@ mod tests {
 				..KnipSettings::default()
 			}
 		);
+	}
+
+	#[test]
+	fn settings_reject_removed_env_settings() {
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: None,
+				env: Some(HashMap::from([("KNIP_LOG_LEVEL".to_string(), "info".to_string())])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("KNIP_LOG_LEVEL"),
+			"error must name the removed env key 'KNIP_LOG_LEVEL', got: {err}"
+		);
+		assert!(
+			err.contains("removed") || err.to_lowercase().contains("env"),
+			"error must describe the env-based setting as removed, got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: None,
+				env: Some(HashMap::from([(
+					"KNIP_PACKAGE_MANAGER".to_string(),
+					"pnpm".to_string(),
+				)])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("KNIP_PACKAGE_MANAGER"),
+			"error must name the removed env key 'KNIP_PACKAGE_MANAGER', got: {err}"
+		);
+	}
+
+	#[test]
+	fn lsp_settings_accept_unrelated_binary_env_entries() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: Some("tools/knip-language-server".to_string()),
+				arguments: None,
+				env: Some(HashMap::from([
+					("PATH".to_string(), "/usr/bin".to_string()),
+					("MY_TOOL_FLAG".to_string(), "true".to_string()),
+				])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap();
+
+		assert_eq!(settings.binary_path.as_deref(), Some("tools/knip-language-server"));
 	}
 
 	#[test]
@@ -949,6 +1053,29 @@ mod tests {
 		assert!(
 			error.contains("require_config"),
 			"error must mention require_config, got: {error}"
+		);
+	}
+
+	#[test]
+	fn settings_reject_missing_explicit_config_path() {
+		let worktree = TestWorktree::new("config-path-missing");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			config_path: Some("missing/knip.json".to_string()),
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+		let expected = worktree.root.join("missing/knip.json").display().to_string();
+
+		assert!(
+			error.contains(&expected),
+			"error must mention the resolved path '{expected}', got: {error}"
+		);
+		assert!(
+			error.contains("config_path") || error.to_lowercase().contains("config"),
+			"error must mention the config_path setting, got: {error}"
 		);
 	}
 
