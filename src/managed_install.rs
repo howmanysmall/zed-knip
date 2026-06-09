@@ -164,7 +164,7 @@ pub(crate) fn apply_editor_workflow_patch(source: &str) -> Result<Option<String>
 	let patched = replace_once(
 		source,
 		"args: { config: configFilePath }",
-		"args: { config: configFilePath, ...(config?.zedKnip?.tsConfigFilePath ? { tsConfig: path.resolve(this.cwd ?? process.cwd(), config.zedKnip.tsConfigFilePath) } : {}) }",
+		"args: { config: configFilePath, ...(config?.zedKnip?.tsConfigFilePath ? { tsConfig: config.zedKnip.tsConfigFilePath } : {}) }",
 		"createOptions editor-workflow",
 	)?;
 
@@ -884,6 +884,23 @@ mod tests {
 		assert!(
 			patched.contains("diagnostic.severity"),
 			"patched source must override diagnostic.severity based on severityByIssueType"
+		);
+	}
+
+	#[test]
+	#[allow(non_snake_case)]
+	fn managed_patch_passes_tsConfig_relative_unchanged() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains("tsConfig: config.zedKnip.tsConfigFilePath"),
+			"patched source must pass the relative configured tsConfig value unchanged so upstream join(dir, options.tsConfigFile) resolves it"
+		);
+		assert!(
+			!patched.contains("path.resolve(this.cwd"),
+			"patched source must NOT resolve tsConfig to an absolute path; upstream CLI --tsConfig semantics expect a relative value"
 		);
 	}
 
