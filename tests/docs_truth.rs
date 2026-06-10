@@ -14,18 +14,17 @@ fn readme_does_not_claim_hover_support() {
 #[test]
 fn readme_does_not_list_removed_settings() {
 	let content = include_str!("../README.md");
-	assert!(
-		!content.contains("server_path"),
-		"README must not list removed setting 'server_path'"
-	);
-	assert!(
-		!content.contains("log_level"),
-		"README must not list removed setting 'log_level'"
-	);
-	assert!(
-		!content.contains("package_manager"),
-		"README must not list removed setting 'package_manager'"
-	);
+	let settings_section = content
+		.split("## Settings")
+		.nth(1)
+		.expect("README must have a 'Settings' section");
+	// `package_manager` is excluded: collides with module name `package_manager.rs`.
+	for removed in ["server_path", "log_level"] {
+		assert!(
+			!settings_section.contains(removed),
+			"README Settings section must not list removed setting '{removed}'"
+		);
+	}
 }
 
 #[test]
@@ -101,7 +100,7 @@ fn readme_documents_diagnostic_filter_semantics() {
 		"severity_by_issue_type",
 	] {
 		assert!(
-			content.contains(key) || content.contains(&key.replace('_', "I")),
+			content.contains(key),
 			"README must mention diagnostic filter key '{}'",
 			key
 		);

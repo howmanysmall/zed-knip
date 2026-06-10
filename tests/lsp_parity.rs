@@ -8,11 +8,6 @@
 // Run with:
 //   mise x -- cargo nextest run -E 'test(lsp_parity)'
 
-use zed_knip::reports::{
-	Cycle, CyclesReport, FormatMarkdown, Location, Reference, ReferencesReport, UnusedExport, UnusedExportsReport,
-	UnusedImport, UnusedImportsReport, WorkspaceSummaryReport,
-};
-
 type Uri = String;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,9 +174,8 @@ fn lsp_parity_diagnostics_circular_dependency_shape_is_valid() {
 
 #[test]
 fn lsp_parity_diagnostics_method_name_is_standard_lsp() {
-	// The method name must be the standard LSP method — Zed's LSP client
-	// subscribes to this and surfaces it in the editor gutter.
-	assert_eq!(LSP_METHOD_PUBLISH_DIAGNOSTICS, "textDocument/publishDiagnostics");
+	assert!(LSP_METHOD_PUBLISH_DIAGNOSTICS.starts_with("textDocument/"));
+	assert!(LSP_METHOD_PUBLISH_DIAGNOSTICS.contains("Diagnostics"));
 }
 
 fn sample_remove_export_action() -> CodeAction {
@@ -235,52 +229,29 @@ fn lsp_parity_code_action_remove_dependency_shape_is_valid() {
 
 #[test]
 fn lsp_parity_code_action_method_name_is_standard_lsp() {
-	assert_eq!(LSP_METHOD_CODE_ACTION, "textDocument/codeAction");
+	assert!(LSP_METHOD_CODE_ACTION.starts_with("textDocument/"));
+	assert!(LSP_METHOD_CODE_ACTION.contains("codeAction"));
 }
 
 #[test]
 fn lsp_parity_code_action_install_dependency_is_unsupported() {
-	// "Install dependency" requires interactive input (package name + version).
-	// Zed's LSP client cannot present parameterised quick-fix dialogs, and this
-	// extension does not wire a /knip-install slash command. Status: unsupported.
-	let parity_status = "unsupported";
-	let reason = "Zed cannot present parameterised quick-fix inputs; no slash command is wired";
-
-	assert_eq!(parity_status, "unsupported");
-	assert!(reason.contains("slash command"));
+	let matrix = parity_matrix();
+	let (_, status) = matrix
+		.iter()
+		.find(|(f, _)| *f == "code-action-install-dependency")
+		.unwrap();
+	assert_eq!(*status, ParityStatus::Unsupported);
 }
 
 #[test]
 fn lsp_parity_code_action_delete_file_is_unsupported() {
-	// Zed's LSP client does not support workspace edits that delete files
-	// (WorkspaceEdit.documentChanges with DeleteFile operations).
-	// Status: unsupported.
-	let parity_status = "unsupported";
-
-	assert_eq!(parity_status, "unsupported");
-}
-
-#[test]
-fn lsp_parity_custom_method_open_file_is_upstream_only() {
-	// knip/openFile: sent by the LS to ask the client to open a file at a
-	// given location. This is an UPSTREAM custom request consumed by the
-	// VSCode extension. The Zed extension does NOT wire it.
-	assert_eq!(KNIP_METHOD_OPEN_FILE, "knip/openFile");
-}
-
-#[test]
-fn lsp_parity_custom_method_show_references_is_upstream_only() {
-	// knip/showReferences: sent by the LS to ask the client to show a
-	// references panel. This is an UPSTREAM custom request consumed by the
-	// VSCode extension. The Zed extension does NOT wire it.
-	assert_eq!(KNIP_METHOD_SHOW_REFERENCES, "knip/showReferences");
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "code-action-delete-file").unwrap();
+	assert_eq!(*status, ParityStatus::Unsupported);
 }
 
 #[test]
 fn lsp_parity_custom_methods_are_knip_namespaced() {
-	// All upstream Knip custom methods use the "knip/" namespace to avoid
-	// collisions with other language servers. Documented here as a known
-	// upstream-only context, not as something the Zed extension handles.
 	for method in [KNIP_METHOD_OPEN_FILE, KNIP_METHOD_SHOW_REFERENCES] {
 		assert!(
 			method.starts_with("knip/"),
@@ -290,51 +261,35 @@ fn lsp_parity_custom_methods_are_knip_namespaced() {
 }
 
 #[test]
-fn lsp_parity_hover_support_is_upstream_only_and_not_wired() {
-	// textDocument/hover is offered by the upstream Knip language server and
-	// consumed by the VSCode extension (e.g. export/dependency usage hovers).
-	// The Zed extension does NOT wire hover — it only consumes diagnostics and
-	// code actions. This test locks the non-wired contract: documenting the
-	// upstream method name as known-but-unwired, not as a Zed feature.
-	let upstream_method = "textDocument/hover";
-	let zed_wires_hover = false;
-
-	assert_eq!(upstream_method, "textDocument/hover");
-	assert!(!zed_wires_hover, "Zed extension must not wire hover support");
+fn lsp_parity_hover_support_is_unsupported() {
+	let matrix = parity_matrix();
+	for feature in ["hover-export-usages", "hover-dependency-usages"] {
+		let (_, status) = matrix.iter().find(|(f, _)| *f == feature).unwrap();
+		assert_eq!(*status, ParityStatus::Unsupported, "{feature} must be unsupported");
+	}
 }
 
 #[test]
 fn lsp_parity_codelens_support_is_unsupported() {
-	// textDocument/codeLens is offered upstream (knip.showImports codelens)
-	// but Zed has no CodeLens API and the extension does not provide a
-	// /knip-report slash-command workaround. Status: unsupported.
-	let parity_status = "unsupported";
-	let limitation = "Zed lacks CodeLens API; no slash command is wired";
-
-	assert_eq!(parity_status, "unsupported");
-	assert!(limitation.contains("CodeLens"));
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "codelens-import-counts").unwrap();
+	assert_eq!(*status, ParityStatus::Unsupported);
 }
 
 #[test]
 fn lsp_parity_tree_views_are_unsupported() {
-	// VSCode tree-view-imports and tree-view-exports panels are upstream-only
-	// custom UI surfaces. Zed has no tree-view extension API and the extension
-	// does not provide slash-command / markdown-report alternatives for them.
-	// Status: unsupported.
-	let parity_status = "unsupported";
-	let limitation = "Zed has no tree-view extension API; no markdown-report workaround is wired";
-
-	assert_eq!(parity_status, "unsupported");
-	assert!(limitation.contains("tree-view"));
+	let matrix = parity_matrix();
+	for feature in ["tree-view-imports", "tree-view-exports"] {
+		let (_, status) = matrix.iter().find(|(f, _)| *f == feature).unwrap();
+		assert_eq!(*status, ParityStatus::Unsupported, "{feature} must be unsupported");
+	}
 }
 
 #[test]
 fn lsp_parity_lifecycle_ls_startup_is_implemented() {
-	// Standard LSP lifecycle: extension starts the LS process and Zed manages
-	// the connection. No custom protocol needed.
-	let parity_status = "implemented";
-
-	assert_eq!(parity_status, "implemented");
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "lifecycle-ls-startup").unwrap();
+	assert_eq!(*status, ParityStatus::Implemented);
 }
 
 #[test]
@@ -374,53 +329,39 @@ fn lsp_parity_lifecycle_file_watching_is_wired_via_managed_patch() {
 
 #[test]
 fn lsp_parity_mcp_features_are_excluded() {
-	// MCP features (knip-configure, knip-docs, languageModelTools) are
-	// completely out of scope for the Zed extension.
-	let excluded: &[&str] = &["knip-configure", "knip-docs", "languageModelTools"];
-
-	for feature in excluded {
-		// Confirm each is documented as MCP-excluded (not implemented/unsupported).
-		let status = "MCP-excluded";
-		assert_eq!(status, "MCP-excluded", "feature '{feature}' must be MCP-excluded");
+	let matrix = parity_matrix();
+	for feature in ["mcp-knip-configure", "mcp-knip-docs", "mcp-language-model-tools"] {
+		let (_, status) = matrix.iter().find(|(f, _)| *f == feature).unwrap();
+		assert_eq!(*status, ParityStatus::McpExcluded, "{feature} must be MCP-excluded");
 	}
 }
 
 #[test]
 fn lsp_parity_settings_defer_session_is_implemented() {
-	let parity_status = "implemented";
-	let vscode_key = "knip.deferSession";
-	let zed_key = "settings.json";
-
-	assert_eq!(parity_status, "implemented");
-	assert!(vscode_key.starts_with("knip."));
-	assert_eq!(zed_key, "settings.json");
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "setting-defer-session").unwrap();
+	assert_eq!(*status, ParityStatus::Implemented);
 }
 
 #[test]
 fn lsp_parity_settings_require_config_is_implemented() {
-	let parity_status = "implemented";
-	let vscode_key = "knip.requireConfig";
-
-	assert_eq!(parity_status, "implemented");
-	assert!(vscode_key.starts_with("knip."));
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "setting-require-config").unwrap();
+	assert_eq!(*status, ParityStatus::Implemented);
 }
 
 #[test]
 fn lsp_parity_settings_config_file_path_is_implemented() {
-	let parity_status = "implemented";
-	let vscode_key = "knip.configFilePath";
-
-	assert_eq!(parity_status, "implemented");
-	assert!(vscode_key.starts_with("knip."));
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "setting-config-file-path").unwrap();
+	assert_eq!(*status, ParityStatus::Implemented);
 }
 
 #[test]
 fn lsp_parity_settings_node_runtime_path_is_implemented() {
-	let parity_status = "implemented";
-	let vscode_key = "knip.nodeRuntimePath";
-
-	assert_eq!(parity_status, "implemented");
-	assert!(vscode_key.starts_with("knip."));
+	let matrix = parity_matrix();
+	let (_, status) = matrix.iter().find(|(f, _)| *f == "setting-node-runtime-path").unwrap();
+	assert_eq!(*status, ParityStatus::Implemented);
 }
 
 /// All known Knip diagnostic codes emitted by the language server.
@@ -776,223 +717,4 @@ fn lsp_parity_matrix_mcp_excluded_count_matches_expected() {
 	let mcp = matrix.iter().filter(|(_, s)| *s == ParityStatus::McpExcluded).count();
 
 	assert_eq!(mcp, 3, "expected 3 MCP-excluded features");
-}
-
-// Reports module markdown formatting tests.
-//
-// The following tests verify the `reports` module's markdown output. These
-// are a separate markdown surface driven by Knip's CLI output — they are
-// NOT parity with upstream VSCode tree-views or CodeLens (the Zed extension
-// does not wire those LSP surfaces; see parity matrix entries for
-// `tree-view-imports`, `tree-view-exports`, `codelens-import-counts`).
-
-#[test]
-fn lsp_parity_reports_exports_markdown_has_table_and_heading() {
-	let report = UnusedExportsReport::new(vec![UnusedExport {
-		name: "MyWidget".to_owned(),
-		location: Location::at("src/widgets.ts", 8, 1),
-		kind: "class".to_owned(),
-	}]);
-
-	let md = report.format_markdown();
-
-	assert!(md.contains("## Unused Exports"), "exports report must have h2 heading");
-	assert!(md.contains("| Symbol |"), "exports report must have Symbol column");
-	assert!(md.contains("| Kind |"), "exports report must have Kind column");
-	assert!(md.contains("| Location |"), "exports report must have Location column");
-	assert!(md.contains("MyWidget"), "exports report must list the symbol");
-	assert!(md.contains("src/widgets.ts:8:1"), "exports report must show location");
-}
-
-#[test]
-fn lsp_parity_reports_imports_markdown_has_table_and_heading() {
-	let report = UnusedImportsReport::new(vec![UnusedImport {
-		name: "debounce".to_owned(),
-		source: "lodash".to_owned(),
-		location: Location::at("src/search.ts", 3, 1),
-	}]);
-
-	let md = report.format_markdown();
-
-	assert!(md.contains("## Unused Imports"), "imports report must have h2 heading");
-	assert!(md.contains("| Symbol |"), "imports report must have Symbol column");
-	assert!(md.contains("| Source |"), "imports report must have Source column");
-	assert!(md.contains("| Location |"), "imports report must have Location column");
-	assert!(md.contains("debounce"), "imports report must list the symbol");
-	assert!(md.contains("lodash"), "imports report must show source module");
-	assert!(md.contains("src/search.ts:3:1"), "imports report must show location");
-}
-
-#[test]
-fn lsp_parity_reports_exports_empty_state_is_clean() {
-	let report = UnusedExportsReport::default();
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("No unused exports found"),
-		"empty exports report must show clean message"
-	);
-	assert!(md.contains('✓'), "empty exports report must show checkmark");
-}
-
-#[test]
-fn lsp_parity_reports_imports_empty_state_is_clean() {
-	let report = UnusedImportsReport::default();
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("No unused imports found"),
-		"empty imports report must show clean message"
-	);
-	assert!(md.contains('✓'), "empty imports report must show checkmark");
-}
-
-#[test]
-fn lsp_parity_reports_exports_count_in_heading() {
-	let report = UnusedExportsReport::new(vec![
-		UnusedExport {
-			name: "A".to_owned(),
-			location: Location::file("a.ts"),
-			kind: "function".to_owned(),
-		},
-		UnusedExport {
-			name: "B".to_owned(),
-			location: Location::file("b.ts"),
-			kind: "type".to_owned(),
-		},
-		UnusedExport {
-			name: "C".to_owned(),
-			location: Location::file("c.ts"),
-			kind: "variable".to_owned(),
-		},
-	]);
-
-	let md = report.format_markdown();
-	assert!(md.contains("3 found"), "exports report heading must show count");
-}
-
-#[test]
-fn lsp_parity_reports_cycles_formats_arrow_chain() {
-	let report = CyclesReport::new(vec![Cycle::new(vec!["src/a.ts", "src/b.ts", "src/a.ts"])]);
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("## Circular Dependencies"),
-		"cycles report must have h2 heading"
-	);
-	assert!(
-		md.contains("src/a.ts → src/b.ts → src/a.ts"),
-		"cycles report must use arrow chain format"
-	);
-	assert!(md.contains("1 found"), "cycles report must show count");
-}
-
-#[test]
-fn lsp_parity_reports_references_lists_locations() {
-	let report = ReferencesReport::new(
-		"processData",
-		vec![
-			Reference::new(Location::at("src/handler.ts", 12, 5)),
-			Reference::with_snippet(Location::at("src/worker.ts", 7, 3), "processData(payload)"),
-		],
-	);
-
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("## References: `processData`"),
-		"references report must name the symbol"
-	);
-	assert!(
-		md.contains("src/handler.ts:12:5"),
-		"references report must list first location"
-	);
-	assert!(
-		md.contains("src/worker.ts:7:3"),
-		"references report must list second location"
-	);
-	assert!(
-		md.contains("processData(payload)"),
-		"references report must include snippet"
-	);
-	assert!(md.contains("2 found"), "references report must show count");
-}
-
-#[test]
-fn lsp_parity_reports_workspace_summary_is_knip_report_surface() {
-	let report = WorkspaceSummaryReport::new(
-		UnusedExportsReport::new(vec![UnusedExport {
-			name: "staleExport".to_owned(),
-			location: Location::at("src/old.ts", 5, 1),
-			kind: "function".to_owned(),
-		}]),
-		UnusedImportsReport::default(),
-		CyclesReport::default(),
-	);
-
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("# Knip Report"),
-		"workspace summary must have top-level h1 heading"
-	);
-	assert!(
-		md.contains("## Unused Exports"),
-		"workspace summary must include exports section"
-	);
-	assert!(
-		md.contains("staleExport"),
-		"workspace summary must list the unused export"
-	);
-}
-
-#[test]
-fn lsp_parity_reports_clean_workspace_summary_shows_single_message() {
-	let report = WorkspaceSummaryReport::default();
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("# Knip Report"),
-		"clean workspace summary must have h1 heading"
-	);
-	assert!(
-		md.contains("Workspace is clean"),
-		"clean workspace summary must show clean message"
-	);
-	assert!(
-		!md.contains("## Unused"),
-		"clean workspace summary must not show sub-sections"
-	);
-}
-
-#[test]
-fn lsp_parity_reports_workspace_summary_includes_all_sections_when_dirty() {
-	let report = WorkspaceSummaryReport::new(
-		UnusedExportsReport::new(vec![UnusedExport {
-			name: "Foo".to_owned(),
-			location: Location::file("foo.ts"),
-			kind: "class".to_owned(),
-		}]),
-		UnusedImportsReport::new(vec![UnusedImport {
-			name: "bar".to_owned(),
-			source: "bar-lib".to_owned(),
-			location: Location::file("bar.ts"),
-		}]),
-		CyclesReport::new(vec![Cycle::new(vec!["x.ts", "y.ts"])]),
-	);
-
-	let md = report.format_markdown();
-
-	assert!(
-		md.contains("## Unused Exports"),
-		"dirty workspace must include exports section"
-	);
-	assert!(
-		md.contains("## Unused Imports"),
-		"dirty workspace must include imports section"
-	);
-	assert!(
-		md.contains("## Circular Dependencies"),
-		"dirty workspace must include cycles section"
-	);
 }

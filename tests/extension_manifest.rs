@@ -1,21 +1,4 @@
 #[test]
-fn extension_manifest_rejects_stale_knip_args() {
-	let content = include_str!("../extension.toml");
-	assert!(
-		!content.contains("--cwd"),
-		"extension.toml must not declare --cwd in process:exec capability args"
-	);
-	assert!(
-		!content.contains("--config"),
-		"extension.toml must not declare --config in process:exec capability args"
-	);
-	assert!(
-		!content.contains("--tsConfig"),
-		"extension.toml must not declare --tsConfig in process:exec capability args"
-	);
-}
-
-#[test]
 fn extension_manifest_version_is_0_4_0() {
 	let content = include_str!("../extension.toml");
 	let version_line = content

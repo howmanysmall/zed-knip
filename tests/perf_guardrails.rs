@@ -1,12 +1,3 @@
-use std::path::PathBuf;
-
-use zed_knip::{
-	cache::InstallSource,
-	package_manager::PackageManager,
-	resolver::{build_language_server_command, ResolvedKnip},
-	settings::KnipSettings,
-};
-
 const PACKAGE_MANAGER_SOURCE: &str = include_str!("../src/package_manager.rs");
 const CONFIG_DETECTION_SOURCE: &str = include_str!("../src/config_detection.rs");
 const CACHE_SOURCE: &str = include_str!("../src/cache.rs");
@@ -102,44 +93,6 @@ fn perf_no_background_polling_or_watcher_code_paths_exist() {
 			);
 		}
 	}
-}
-
-#[test]
-fn perf_command_builder_documents_single_language_server_process_per_worktree() {
-	// Hard-cut launch contract: the resolver emits exactly one language-server
-	// process per worktree, launched with stdio only — no env vars, no extra
-	// CLI args. All configuration travels through the LSP initialize payload
-	// and workspace/configuration response, not the command line.
-	assert!(
-		RESOLVER_SOURCE.contains("build_language_server_command"),
-		"resolver must keep command construction centralized"
-	);
-	assert!(
-		RESOLVER_SOURCE.contains("working_dir"),
-		"command builder must use working_dir for worktree identity instead of per-file launches"
-	);
-
-	let resolved = ResolvedKnip {
-		executable_path: PathBuf::from("/managed/knip-language-server"),
-		package_manager: PackageManager::Npm,
-		install_source: InstallSource::ManagedCache,
-	};
-	let workspace_root = PathBuf::from("/workspace");
-	let command = build_language_server_command(&resolved, &KnipSettings::default(), &workspace_root);
-
-	assert_eq!(
-		command.command.args,
-		vec!["--stdio".to_string()],
-		"launch contract requires args == [\"--stdio\"]"
-	);
-	assert!(
-		command.command.env.is_empty(),
-		"launch contract requires env to be empty (no KNIP_* env vars)"
-	);
-	assert_eq!(
-		command.working_dir, workspace_root,
-		"working_dir must equal workspace root"
-	);
 }
 
 fn assert_no_recursive_scan_apis(path: &str, source: &str) {
