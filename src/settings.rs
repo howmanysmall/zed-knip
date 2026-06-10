@@ -1,4 +1,5 @@
 use std::{collections::BTreeMap, fmt, path::Path, str::FromStr};
+use zed_extension_api::serde_json::Value;
 
 /// Valid Knip issue types for diagnostics filtering.
 pub const VALID_ISSUE_TYPES: &[&str] = &[
@@ -123,6 +124,18 @@ pub struct KnipSettings {
 	/// Not user-configurable via settings JSON.
 	/// Used internally when constructing resolver inputs.
 	pub log_level: LogLevel,
+	/// Preprocessor tools to run before Knip analysis.
+	///
+	/// Entries starting with `./` are local paths; others are package specifiers.
+	///
+	/// Default: empty.
+	pub preprocessor: Vec<String>,
+	/// Options passed to preprocessor tools.
+	///
+	/// Must be a JSON object. Requires at least one preprocessor to be configured.
+	///
+	/// Default: None.
+	pub preprocessor_options: Option<BTreeMap<String, Value>>,
 }
 
 impl Default for KnipSettings {
@@ -136,6 +149,8 @@ impl Default for KnipSettings {
 			diagnostics: KnipDiagnosticsSettings::default(),
 			package_manager: None,
 			log_level: LogLevel::Info,
+			preprocessor: Vec::new(),
+			preprocessor_options: None,
 		}
 	}
 }
@@ -144,6 +159,8 @@ impl KnipSettings {
 	/// Merge `overrides` on top of `self`.
 	///
 	/// `Option` fields keep the base value when the override is `None`.
+	/// `preprocessor` keeps base when override is empty.
+	/// `preprocessor_options` keeps base when override is `None`.
 	pub fn merge(self, overrides: Self) -> Self {
 		Self {
 			binary_path: overrides.binary_path.or(self.binary_path),
@@ -154,6 +171,12 @@ impl KnipSettings {
 			diagnostics: overrides.diagnostics,
 			package_manager: overrides.package_manager.or(self.package_manager),
 			log_level: overrides.log_level,
+			preprocessor: if overrides.preprocessor.is_empty() {
+				self.preprocessor
+			} else {
+				overrides.preprocessor
+			},
+			preprocessor_options: overrides.preprocessor_options.or(self.preprocessor_options),
 		}
 	}
 
@@ -162,7 +185,7 @@ impl KnipSettings {
 	/// The patch is needed whenever advanced editor settings are present that the vanilla
 	/// language server does not support natively.
 	pub fn requires_managed_patch(&self) -> bool {
-		self.ts_config_path.is_some() || !self.diagnostics_is_default()
+		self.ts_config_path.is_some() || !self.diagnostics_is_default() || !self.preprocessor.is_empty()
 	}
 
 	/// Returns `true` if all diagnostics sub-fields are at their defaults (all empty).
@@ -195,6 +218,12 @@ impl KnipSettings {
 		}
 		if !self.diagnostics.severity_by_issue_type.is_empty() {
 			advanced.push("lsp.knip.settings.diagnostics.severity_by_issue_type");
+		}
+		if !self.preprocessor.is_empty() {
+			advanced.push("lsp.knip.settings.preprocessor");
+		}
+		if self.preprocessor_options.is_some() {
+			advanced.push("lsp.knip.settings.preprocessor_options");
 		}
 		advanced
 	}
@@ -241,6 +270,18 @@ impl KnipSettings {
 					reason: format!("path prefix '{prefix}' must not contain '..' traversal"),
 				});
 			}
+		}
+
+		// Validate preprocessor specifiers.
+		for prep in &self.preprocessor {
+			validate_preprocessor_specifier(prep)?;
+		}
+
+		// Validate preprocessor_options: if present, requires at least one preprocessor.
+		if self.preprocessor_options.is_some() && self.preprocessor.is_empty() {
+			return Err(KnipSettingsError::InvalidPreprocessorOptions {
+				reason: "preprocessor_options requires at least one preprocessor to be configured".to_string(),
+			});
 		}
 
 		Ok(())
@@ -292,6 +333,59 @@ impl FromStr for LogLevel {
 	}
 }
 
+/// Validate a preprocessor specifier string.
+///
+/// Returns `Ok(())` for valid entries:
+/// - Local paths starting with `./` (e.g., `./tools/preprocess.mjs`)
+/// - Package names (e.g., `preprocessor-package`)
+/// - Package subpaths (e.g., `pkg/subpath`, `@scope/pkg/subpath`)
+///
+/// Returns an error for invalid entries:
+/// - Empty strings
+/// - Paths starting with `../`, `/`, `~/`
+/// - Protocol prefixes like `file:`, `node:`, `data:`, `http:`, `https:`
+fn validate_preprocessor_specifier(specifier: &str) -> Result<(), KnipSettingsError> {
+	if specifier.is_empty() {
+		return Err(KnipSettingsError::InvalidPreprocessor {
+			value: specifier.to_string(),
+			reason: "preprocessor specifier cannot be empty".to_string(),
+		});
+	}
+
+	if specifier.starts_with("../") {
+		return Err(KnipSettingsError::InvalidPreprocessor {
+			value: specifier.to_string(),
+			reason: "preprocessor specifier cannot start with '../'".to_string(),
+		});
+	}
+
+	if specifier.starts_with('/') {
+		return Err(KnipSettingsError::InvalidPreprocessor {
+			value: specifier.to_string(),
+			reason: "preprocessor specifier cannot be an absolute path".to_string(),
+		});
+	}
+
+	if specifier.starts_with("~/~") || specifier.starts_with('~') {
+		return Err(KnipSettingsError::InvalidPreprocessor {
+			value: specifier.to_string(),
+			reason: "preprocessor specifier cannot start with '~'".to_string(),
+		});
+	}
+
+	let invalid_prefixes = ["file:", "node:", "data:", "http://", "https://"];
+	for prefix in invalid_prefixes {
+		if specifier.starts_with(prefix) {
+			return Err(KnipSettingsError::InvalidPreprocessor {
+				value: specifier.to_string(),
+				reason: format!("preprocessor specifier cannot start with '{}'", prefix),
+			});
+		}
+	}
+
+	Ok(())
+}
+
 /// Errors produced while validating Knip settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnipSettingsError {
@@ -317,6 +411,10 @@ pub enum KnipSettingsError {
 		name: &'static str,
 		replacement: &'static str,
 	},
+	/// An invalid preprocessor specifier was provided.
+	InvalidPreprocessor { value: String, reason: String },
+	/// An invalid preprocessor_options value was provided.
+	InvalidPreprocessorOptions { reason: String },
 }
 
 impl fmt::Display for KnipSettingsError {
@@ -355,6 +453,15 @@ impl fmt::Display for KnipSettingsError {
 					"Removed env-based setting 'lsp.knip.binary.env.{name}'. The Knip language server does not consume this env var. Use '{replacement}' (and other LSP settings) instead."
 				)
 			}
+			Self::InvalidPreprocessor { value, reason } => {
+				write!(
+					f,
+					"Invalid lsp.knip.settings.preprocessor entry '{value}': {reason}. Valid entries are local paths starting with './', package names, or package subpaths."
+				)
+			}
+			Self::InvalidPreprocessorOptions { reason } => {
+				write!(f, "Invalid lsp.knip.settings.preprocessor_options: {reason}.")
+			}
 		}
 	}
 }
@@ -363,7 +470,7 @@ impl std::error::Error for KnipSettingsError {}
 
 #[cfg(test)]
 mod tests {
-	use super::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError, LogLevel};
+	use super::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError, LogLevel, Value};
 	use std::str::FromStr;
 
 	#[test]
@@ -381,6 +488,8 @@ mod tests {
 				ts_config_path: None,
 				diagnostics: KnipDiagnosticsSettings::default(),
 				package_manager: None,
+				preprocessor: Vec::new(),
+				preprocessor_options: None,
 			}
 		);
 	}
@@ -557,5 +666,292 @@ mod tests {
 			dotdot_prefix.validate(),
 			Err(KnipSettingsError::InvalidPathPrefix { .. })
 		));
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_local_path() {
+		let settings = KnipSettings {
+			preprocessor: vec!["./tools/preprocess.mjs".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(settings.validate().is_ok());
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_package_name() {
+		let settings = KnipSettings {
+			preprocessor: vec!["preprocessor-package".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(settings.validate().is_ok());
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_package_subpath() {
+		let settings = KnipSettings {
+			preprocessor: vec!["pkg/subpath".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(settings.validate().is_ok());
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_scoped_package_subpath() {
+		let settings = KnipSettings {
+			preprocessor: vec!["@scope/pkg/subpath".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(settings.validate().is_ok());
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_parent_dir_reference() {
+		let settings = KnipSettings {
+			preprocessor: vec!["../x.js".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_absolute_path() {
+		let settings = KnipSettings {
+			preprocessor: vec!["/x.js".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_home_path() {
+		let settings = KnipSettings {
+			preprocessor: vec!["~/x.js".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_file_protocol() {
+		let settings = KnipSettings {
+			preprocessor: vec!["file:x.js".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_http_protocol() {
+		let settings = KnipSettings {
+			preprocessor: vec!["http://x".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_https_protocol() {
+		let settings = KnipSettings {
+			preprocessor: vec!["https://x".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_empty_string() {
+		let settings = KnipSettings {
+			preprocessor: vec![String::new()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_node_protocol() {
+		let settings = KnipSettings {
+			preprocessor: vec!["node:fs".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_data_protocol() {
+		let settings = KnipSettings {
+			preprocessor: vec!["data:text/plain".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessor { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_options_requires_preprocessor() {
+		use std::collections::BTreeMap;
+		let mut options = BTreeMap::new();
+		options.insert("key".to_string(), Value::String("value".to_string()));
+
+		let settings = KnipSettings {
+			preprocessor_options: Some(options),
+			..KnipSettings::default()
+		};
+		assert!(matches!(
+			settings.validate(),
+			Err(KnipSettingsError::InvalidPreprocessorOptions { .. })
+		));
+	}
+
+	#[test]
+	fn preprocessor_options_valid_with_preprocessor() {
+		use std::collections::BTreeMap;
+		let mut options = BTreeMap::new();
+		options.insert("key".to_string(), Value::String("value".to_string()));
+
+		let settings = KnipSettings {
+			preprocessor: vec!["preprocessor-package".to_string()],
+			preprocessor_options: Some(options),
+			..KnipSettings::default()
+		};
+		assert!(settings.validate().is_ok());
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn preprocessor_merge_empty_override_keeps_base() {
+		let base = KnipSettings {
+			preprocessor: vec!["base-prep".to_string()],
+			..KnipSettings::default()
+		};
+		let merged = base.merge(KnipSettings {
+			preprocessor: Vec::new(),
+			..KnipSettings::default()
+		});
+		assert_eq!(merged.preprocessor, vec!["base-prep".to_string()]);
+	}
+
+	#[test]
+	fn preprocessor_merge_non_empty_override_replaces_base() {
+		let base = KnipSettings {
+			preprocessor: vec!["base-prep".to_string()],
+			..KnipSettings::default()
+		};
+		let merged = base.merge(KnipSettings {
+			preprocessor: vec!["override-prep".to_string()],
+			..KnipSettings::default()
+		});
+		assert_eq!(merged.preprocessor, vec!["override-prep".to_string()]);
+	}
+
+	#[test]
+	fn preprocessor_options_merge_none_keeps_base() {
+		use std::collections::BTreeMap;
+		let mut base_options = BTreeMap::new();
+		base_options.insert("key".to_string(), Value::String("value".to_string()));
+
+		let base = KnipSettings {
+			preprocessor: vec!["prep".to_string()],
+			preprocessor_options: Some(base_options),
+			..KnipSettings::default()
+		};
+		let merged = base.merge(KnipSettings {
+			preprocessor_options: None,
+			..KnipSettings::default()
+		});
+		assert!(merged.preprocessor_options.is_some());
+	}
+
+	#[test]
+	fn preprocessor_options_merge_some_replaces_base() {
+		use std::collections::BTreeMap;
+		let mut base_options = BTreeMap::new();
+		base_options.insert("base-key".to_string(), Value::String("base-value".to_string()));
+
+		let mut override_options = BTreeMap::new();
+		override_options.insert("override-key".to_string(), Value::String("override-value".to_string()));
+
+		let base = KnipSettings {
+			preprocessor: vec!["prep".to_string()],
+			preprocessor_options: Some(base_options),
+			..KnipSettings::default()
+		};
+		let merged = base.merge(KnipSettings {
+			preprocessor_options: Some(override_options),
+			..KnipSettings::default()
+		});
+		assert!(merged.preprocessor_options.is_some());
+		let opts = merged.preprocessor_options.unwrap();
+		assert!(opts.contains_key("override-key"));
+		assert!(!opts.contains_key("base-key"));
+	}
+
+	#[test]
+	fn preprocessor_advanced_settings_list_includes_preprocessor() {
+		let settings = KnipSettings {
+			preprocessor: vec!["prep".to_string()],
+			..KnipSettings::default()
+		};
+		let advanced = settings.advanced_settings_list();
+		assert!(advanced.contains(&"lsp.knip.settings.preprocessor"));
+	}
+
+	#[test]
+	fn preprocessor_advanced_settings_list_includes_preprocessor_options() {
+		use std::collections::BTreeMap;
+		let mut options = BTreeMap::new();
+		options.insert("key".to_string(), Value::String("value".to_string()));
+
+		let settings = KnipSettings {
+			preprocessor: vec!["prep".to_string()],
+			preprocessor_options: Some(options),
+			..KnipSettings::default()
+		};
+		let advanced = settings.advanced_settings_list();
+		assert!(advanced.contains(&"lsp.knip.settings.preprocessor_options"));
+	}
+
+	#[test]
+	fn preprocessor_requires_managed_patch_when_non_empty() {
+		let settings = KnipSettings {
+			preprocessor: vec!["prep".to_string()],
+			..KnipSettings::default()
+		};
+		assert!(settings.requires_managed_patch());
+	}
+
+	#[test]
+	fn preprocessor_requires_managed_patch_false_when_empty() {
+		let settings = KnipSettings {
+			preprocessor: Vec::new(),
+			..KnipSettings::default()
+		};
+		assert!(!settings.requires_managed_patch());
 	}
 }
