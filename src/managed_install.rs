@@ -1214,4 +1214,149 @@ mod tests {
 			"server.js must remain unchanged after patch-stage failure"
 		);
 	}
+
+	// ============================================================
+	// Task 7: result consistency + settings-change invalidation
+	// ============================================================
+	// These source-level assertions guard the invariants that:
+	//   1. diagnostics and `REQUEST_RESULTS` read from the SAME
+	//      transformed state slot (`zedKnipTransformedIssues` /
+	//      `zedKnipTransformedResults`) so a transformed result can
+	//      never be served from one path while stale on the other,
+	//   2. `start()`, `handleFileChanges()`, and `getResults()` each
+	//      compare the active fingerprint before serving transformed
+	//      state, and on mismatch clear and recompute the state.
+	//
+	// The patched JS is the only place these invariants live, so
+	// pinning the exact text is the only way to keep them honest
+	// against accidental refactors that would split the storage.
+
+	fn patched_preprocessor_source() -> String {
+		apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("preprocessor patch must not error on pinned fixture")
+			.expect("pinned fixture must be unpatched")
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_diagnostics_use_same_state_as_get_results() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("zedKnipTransformedIssues"),
+			"diagnostic publish path must read from zedKnipTransformedIssues"
+		);
+		assert!(
+			patched.contains("zedKnipTransformedResults"),
+			"getResults() must return zedKnipTransformedResults"
+		);
+		assert!(
+			patched.contains(
+				"this.publishDiagnostics(this.buildDiagnostics(zedKnipDiagnosticsIssues, config, this.rules))"
+			),
+			"diagnostic publish path must route through zedKnipDiagnosticsIssues"
+		);
+		assert!(
+			patched.contains("const zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null\n        ? this.zedKnipTransformedIssues\n        : zedKnipPreprocessorConfig.preprocessors.length > 0\n          ? {}\n          : session.getIssues().issues;"),
+			"diagnostic publish path must read zedKnipTransformedIssues with the empty-object fallback for configured-but-untransformed preprocessors"
+		);
+		assert!(
+			patched.contains("if (this.zedKnipTransformedResults !== null) return this.zedKnipTransformedResults"),
+			"getResults() must return the transformed slot when populated"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_handle_file_changes_uses_same_state() {
+		let patched = patched_preprocessor_source();
+
+		let file_change_block = patched
+			.split("handleFileChanges")
+			.nth(1)
+			.expect("patched source must contain handleFileChanges");
+
+		assert!(
+			file_change_block.contains("this.zedKnipTransformedIssues = output.issues"),
+			"handleFileChanges() must assign output.issues to this.zedKnipTransformedIssues"
+		);
+		assert!(
+			file_change_block.contains("this.zedKnipTransformedResults = output"),
+			"handleFileChanges() must assign output to this.zedKnipTransformedResults"
+		);
+		assert!(
+			file_change_block.contains("this.zedKnipPreprocessorFingerprint = zedKnipPreprocessorConfig.fingerprint"),
+			"handleFileChanges() must record the post-transform fingerprint"
+		);
+		assert!(
+			file_change_block.contains("zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null"),
+			"handleFileChanges() must read transformed issues for its diagnostic publish"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_fail_closed_clears_all_state() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT")
+				&& patched.contains("this.zedKnipTransformedIssues = null")
+				&& patched.contains("this.zedKnipTransformedResults = null"),
+			"fail-closed branch must clear fingerprint + transformed issues + transformed results"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_start_path_clears_state_on_each_invocation() {
+		let patched = patched_preprocessor_source();
+
+		let start_block = patched
+			.split("async start()")
+			.nth(1)
+			.expect("patched source must contain start()");
+		assert!(
+			start_block.contains("this.zedKnipPreprocessorFingerprint = null")
+				&& start_block.contains("this.zedKnipTransformedIssues = null")
+				&& start_block.contains("this.zedKnipTransformedResults = null"),
+			"start() must clear fingerprint + transformed state on each invocation"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_handle_file_changes_compares_and_clears() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("const zedKnipPreprocessorConfig = normalizeZedKnipPreprocessorConfig(config);"),
+			"handleFileChanges() must normalize the active config to derive the fingerprint"
+		);
+		assert!(
+			patched.contains(
+				"if (this.zedKnipPreprocessorFingerprint !== zedKnipPreprocessorConfig.fingerprint) {\n        this.zedKnipPreprocessorFingerprint = null;\n        this.zedKnipTransformedIssues = null;\n        this.zedKnipTransformedResults = null;\n      }"
+			),
+			"handleFileChanges() must clear transformed state when the active fingerprint diverges from the recorded one"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_get_results_returns_null_after_mismatch() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains(
+				"if (preprocessors.length > 0 || this.zedKnipPreprocessorFingerprint === PREPROCESSOR_PATCH_FAILED_FINGERPRINT) return null"
+			),
+			"getResults() must return null after a failed-fingerprint sentinel OR when preprocessors are still configured"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_deterministic_string_is_documented_in_patch() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains(
+				"const fingerprint = typeof zedKnip.preprocessorFingerprint === 'string'\n    ? zedKnip.preprocessorFingerprint\n    : `${preprocessors.join('|')}:${JSON.stringify(Object.keys(preprocessorOptions).sort())}`"
+			),
+			"normalizeZedKnipPreprocessorConfig() must build the fingerprint from ordered join + sorted option keys"
+		);
+	}
 }

@@ -542,3 +542,228 @@ fn failure_all_error_variants_produce_non_empty_messages() {
 		);
 	}
 }
+
+// =====================================================================
+// Preprocessor failure modes (Task 7)
+// =====================================================================
+// JS-runtime failures are verified at the source level against the pinned
+// managed-server fixture; settings-level validation uses the public
+// `KnipSettings::validate()` API.
+
+/// An invalid preprocessor specifier (parent-dir traversal) must be rejected
+/// at parse time and the error must name the specifier so the user can
+/// locate the bad entry in their `settings.json`.
+#[test]
+fn failure_preprocessor_invalid_specifier_settings_validation_error_naming_specifier() {
+	let settings = KnipSettings {
+		preprocessor: vec!["../escape.js".to_string()],
+		..KnipSettings::default()
+	};
+
+	let error = settings
+		.validate()
+		.expect_err("parent-dir specifier must be rejected at parse time");
+
+	let message = error.to_string();
+	assert!(
+		message.contains("../escape.js"),
+		"error must name the offending specifier, got: {message}"
+	);
+	assert!(
+		message.contains("lsp.knip.settings.preprocessor"),
+		"error must name the lsp.knip.settings.preprocessor key, got: {message}"
+	);
+	assert!(
+		message.contains("'../'") || message.to_lowercase().contains("parent"),
+		"error must explain why the specifier is invalid, got: {message}"
+	);
+}
+
+/// Every specifier shape we reject at parse time must surface the bad value
+/// in the user-facing message so it can be fixed without grep'ing the JSON.
+#[test]
+fn failure_preprocessor_invalid_specifier_variants_each_name_their_value() {
+	let bad_specifiers = [
+		("../x.js", "parent directory traversal"),
+		("/abs/x.js", "absolute path"),
+		("~/x.js", "home expansion"),
+		("file:x.js", "file: protocol"),
+		("node:fs", "node: protocol"),
+		("data:text/plain", "data: protocol"),
+		("http://x", "http: protocol"),
+		("https://x", "https: protocol"),
+		("", "empty string"),
+	];
+
+	for (bad, label) in bad_specifiers {
+		let settings = KnipSettings {
+			preprocessor: vec![bad.to_string()],
+			..KnipSettings::default()
+		};
+		let error = settings
+			.validate()
+			.expect_err(&format!("settings.validate() must reject {label} specifier '{bad}'"));
+
+		let message = error.to_string();
+		assert!(
+			message.contains(bad) || bad.is_empty(),
+			"error for {label} specifier must name the bad value, got: {message}"
+		);
+		assert!(
+			message.contains("lsp.knip.settings.preprocessor"),
+			"error for {label} specifier must name the setting, got: {message}"
+		);
+	}
+}
+
+/// `preprocessor_options` requires at least one preprocessor entry to be
+/// configured. The error string must name the option and explain the
+/// dependency so the user can resolve it without reading source.
+#[test]
+fn failure_preprocessor_options_without_preprocessor_rejected_with_actionable_message() {
+	use std::collections::BTreeMap;
+	let mut options = BTreeMap::new();
+	options.insert("key".to_string(), serde_json_lite_value("value"));
+
+	let settings = KnipSettings {
+		preprocessor_options: Some(options),
+		..KnipSettings::default()
+	};
+
+	let error = settings
+		.validate()
+		.expect_err("preprocessor_options without preprocessor must be rejected at parse time");
+
+	let message = error.to_string();
+	assert!(
+		message.contains("lsp.knip.settings.preprocessor_options"),
+		"error must name the lsp.knip.settings.preprocessor_options key, got: {message}"
+	);
+	assert!(
+		message.contains("preprocessor") && message.to_lowercase().contains("requires"),
+		"error must explain the dependency on lsp.knip.settings.preprocessor, got: {message}"
+	);
+}
+
+/// The preprocessor-options error must surface the underlying `KnipSettingsError`
+/// variant exactly so settings_for_worktree() can serialize it to the user.
+#[test]
+fn failure_preprocessor_options_without_preprocessor_surfaces_typed_error() {
+	use std::collections::BTreeMap;
+	let mut options = BTreeMap::new();
+	options.insert("flag".to_string(), zed_extension_api::serde_json::Value::Bool(true));
+
+	let settings = KnipSettings {
+		preprocessor_options: Some(options),
+		..KnipSettings::default()
+	};
+
+	let error = settings
+		.validate()
+		.expect_err("preprocessor_options without preprocessor must produce InvalidPreprocessorOptions");
+
+	assert!(
+		matches!(
+			error,
+			zed_knip::settings::KnipSettingsError::InvalidPreprocessorOptions { .. }
+		),
+		"error must be the InvalidPreprocessorOptions variant, got: {error:?}"
+	);
+}
+
+/// The preprocessor specifier error must be `InvalidPreprocessor` (not a
+/// generic rejection) so callers can distinguish it from other validation
+/// failures programmatically.
+#[test]
+fn failure_preprocessor_invalid_specifier_surfaces_typed_error() {
+	let settings = KnipSettings {
+		preprocessor: vec!["../escape.js".to_string()],
+		..KnipSettings::default()
+	};
+
+	let error = settings
+		.validate()
+		.expect_err("parent-dir specifier must produce InvalidPreprocessor");
+
+	assert!(
+		matches!(error, zed_knip::settings::KnipSettingsError::InvalidPreprocessor { ref value, .. } if value == "../escape.js"),
+		"error must be the InvalidPreprocessor variant with value=../escape.js, got: {error:?}"
+	);
+}
+
+/// When the dynamic `import(specifier)` call rejects, the patched JS
+/// must wrap the cause in an `Error` whose message names the specifier.
+/// This source-level assertion guards the import-failure path so the
+/// `start()` / `handleFileChanges()` `try/catch` has something specific
+/// to log to `connection.console.error`.
+#[test]
+fn failure_preprocessor_import_failure_patched_source_names_specifier() {
+	let source = include_str!("../tests/fixtures/managed-server/knip-language-server-server.js");
+	let patched = zed_knip::managed_install::apply_preprocessor_patch(source)
+		.expect("patch must apply")
+		.expect("fixture must be unpatched");
+
+	assert!(
+		patched.contains("Failed to import preprocessor '${resolved.spec}' from ${resolved.url}"),
+		"import-failure path must embed the specifier in the thrown error"
+	);
+	assert!(
+		patched.contains("await import(resolved.url)"),
+		"import-failure path must wrap the dynamic import() call"
+	);
+}
+
+/// When a preprocessor module's default export is not a function, the
+/// patched JS must throw an `Error` that names the specifier so the
+/// `start()` / `handleFileChanges()` fail-closed branch can surface it.
+#[test]
+fn failure_preprocessor_non_function_export_patched_source_names_specifier() {
+	let source = include_str!("../tests/fixtures/managed-server/knip-language-server-server.js");
+	let patched = zed_knip::managed_install::apply_preprocessor_patch(source)
+		.expect("patch must apply")
+		.expect("fixture must be unpatched");
+
+	assert!(
+		patched.contains("Preprocessor '${input.spec}' must export a function"),
+		"non-function-export error must embed the specifier"
+	);
+	assert!(
+		patched.contains("if (typeof preprocessor !== 'function')"),
+		"non-function-export check must use typeof guard"
+	);
+	assert!(
+		patched.contains("const preprocessor = module.default ?? module"),
+		"non-function-export check must read module.default ?? module"
+	);
+}
+
+/// A preprocessor that throws (sync) or rejects (async) must be
+/// caught at the orchestration site without bringing down the LSP.
+/// The `start()` and `handleFileChanges()` sites must each have a
+/// `try { ... } catch (error) { ... }` around the `runZedKnipPreprocessors`
+/// call so the patched language server keeps running.
+#[test]
+fn failure_preprocessor_thrown_error_patched_source_surfaces_via_console_error() {
+	let source = include_str!("../tests/fixtures/managed-server/knip-language-server-server.js");
+	let patched = zed_knip::managed_install::apply_preprocessor_patch(source)
+		.expect("patch must apply")
+		.expect("fixture must be unpatched");
+
+	let start_try_catch = "try {\n          const reporterOptions = buildZedKnipReporterOptions.call(this, session.getResults(), session, config, configFilePath);\n          const output = await runZedKnipPreprocessors(\n            zedKnipPreprocessorConfig.preprocessors,\n            reporterOptions,\n            this.cwd ?? process.cwd()\n          );\n          this.zedKnipTransformedIssues = output.issues;\n          this.zedKnipTransformedResults = output;\n          this.zedKnipPreprocessorFingerprint = zedKnipPreprocessorConfig.fingerprint;\n        } catch (error) {\n          this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT;\n          this.zedKnipTransformedIssues = null;\n          this.zedKnipTransformedResults = null;\n          const message = `Knip preprocessor failed: ${error?.message ?? error}`;\n          this.connection.console.error(message);\n          if (this.connection.window?.showMessage) {\n            this.connection.window.showMessage(1, message);\n          }\n        }";
+	assert!(
+		patched.contains(start_try_catch),
+		"start() must wrap runZedKnipPreprocessors in try/catch and surface the error via console.error"
+	);
+
+	let file_change_try_catch = "} catch (error) {\n          this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT;\n          this.zedKnipTransformedIssues = null;\n          this.zedKnipTransformedResults = null;\n          const message = `Knip preprocessor failed after file changes: ${error?.message ?? error}`;\n          this.connection.console.error(message);\n          if (this.connection.window?.showMessage) {\n            this.connection.window.showMessage(1, message);\n          }\n          this.publishDiagnostics(new Map());\n          return null;\n        }";
+	assert!(
+		patched.contains(file_change_try_catch),
+		"handleFileChanges() must wrap runZedKnipPreprocessors in try/catch and surface the error via console.error"
+	);
+}
+
+// Helper: build a JSON-ish value for preprocessor_options using the
+// `zed_extension_api` re-export so the test never needs a real JSON dep.
+fn serde_json_lite_value(text: &str) -> zed_extension_api::serde_json::Value {
+	zed_extension_api::serde_json::Value::String(text.to_string())
+}

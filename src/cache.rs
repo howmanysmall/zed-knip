@@ -272,4 +272,56 @@ mod tests {
 			assert!(message.contains("writable"));
 		}
 	}
+
+	// ============================================================
+	// Preprocessor settings invalidation
+	// ============================================================
+	// The LSP fingerprint under `config.zedKnip.preprocessorFingerprint`
+	// (emitted from `knip_workspace_configuration` and read by the patched
+	// `start()` / `handleFileChanges()` / `getResults()` paths) is the
+	// sole invalidation mechanism for transformed preprocessor state. The
+	// on-disk `WorktreeCache` does not need to track preprocessor settings
+	// separately — the cached binary itself is still correct after a
+	// preprocessor change, only the JS-side transformed state needs to be
+	// re-derived, and the LSP fingerprint check handles that.
+	mod cache_preprocessor {
+		use super::*;
+
+		#[test]
+		fn cache_preprocessor_settings_change_routes_through_settings_hash_only() {
+			let cache = valid_cache();
+			let base = cache.invalidation_inputs;
+			let preprocessor_changed_inputs = InvalidationInputs {
+				package_json_mtime: base.package_json_mtime,
+				lockfile_mtime: base.lockfile_mtime,
+				knip_config_mtime: base.knip_config_mtime,
+				settings_hash: base.settings_hash.wrapping_add(1),
+			};
+
+			assert_eq!(
+				cache.check_validity(&preprocessor_changed_inputs),
+				CacheState::Stale(StaleReason::SettingsChanged),
+				"a settings_hash change MUST surface as a settings change so callers can re-resolve"
+			);
+		}
+
+		#[test]
+		fn cache_preprocessor_inputs_contain_no_preprocessor_specific_field() {
+			// Guard the type-level invariant: if a future change ever
+			// adds a `preprocessor_hash` or `preprocessor_options_hash`
+			// field to `InvalidationInputs`, this test will fail to
+			// compile because the field initializers will be incomplete.
+			let inputs = InvalidationInputs {
+				package_json_mtime: None,
+				lockfile_mtime: None,
+				knip_config_mtime: None,
+				settings_hash: 0,
+			};
+
+			assert_eq!(inputs.package_json_mtime, None);
+			assert_eq!(inputs.lockfile_mtime, None);
+			assert_eq!(inputs.knip_config_mtime, None);
+			assert_eq!(inputs.settings_hash, 0);
+		}
+	}
 }
