@@ -23,6 +23,7 @@ fn fixture_inventory() {
 		"missing-knip",
 		"invalid-config",
 		"missing-config",
+		"managed-server",
 		"multiple-lockfiles",
 		"path with spaces",
 	];
@@ -45,7 +46,7 @@ fn fixture_inventory() {
 		assert!(actual.contains(name), "fixture not discoverable: {name}");
 	}
 
-	assert_eq!(actual.len(), 15, "unexpected fixture inventory: {actual:?}");
+	assert_eq!(actual.len(), 16, "unexpected fixture inventory: {actual:?}");
 }
 
 #[test]
