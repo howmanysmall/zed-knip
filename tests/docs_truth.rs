@@ -58,6 +58,8 @@ fn readme_documents_supported_knip_settings_only() {
 		"require_config",
 		"ts_config_path",
 		"binary.path",
+		"preprocessor",
+		"preprocessor_options",
 	] {
 		assert!(
 			settings_section.contains(setting),
@@ -159,13 +161,33 @@ fn readme_rejects_unsupported_knip_claim_about_cli_args() {
 		"README must not claim --tsConfig is usable (should be rejected/omitted)"
 	);
 	assert!(
-		!content.contains("--preprocessor"),
-		"README must not claim --preprocessor is usable"
-	);
-	assert!(
 		!content.contains("--reporter"),
 		"README must not claim --reporter is usable"
 	);
+}
+
+/// Preprocessor settings may be documented, but README must not instruct users
+/// to set preprocessors via `lsp.knip.binary.arguments` or launch args.
+#[test]
+fn readme_preprocessor_must_not_guide_launch_args() {
+	let content = include_str!("../README.md");
+	assert!(
+		!content.contains("--preprocessor"),
+		"README must not mention --preprocessor flag usage"
+	);
+	// Proximity check: binary.arguments and preprocessor within 200 chars indicates misleading guidance
+	let content_lower = content.to_lowercase();
+	let mut search_pos = 0_usize;
+	while let Some(pos) = content_lower[search_pos..].find("preprocessor") {
+		let abs_pos = search_pos + pos;
+		let window_start = abs_pos.saturating_sub(200);
+		let window_end = (abs_pos + "preprocessor".len() + 200).min(content.len());
+		let window = &content[window_start..window_end];
+		if window.contains("binary.arguments") {
+			panic!("README must not guide users to set preprocessors via lsp.knip.binary.arguments");
+		}
+		search_pos = abs_pos + 1;
+	}
 }
 
 #[test]
