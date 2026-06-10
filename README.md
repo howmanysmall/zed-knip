@@ -30,6 +30,8 @@ Configure the extension under `lsp.knip` in your Zed `settings.json`.
         "config_path": "knip.json",
         "require_config": false,
         "ts_config_path": "tsconfig.knip.json",
+        "preprocessor": ["./tools/knip-preprocessor.mjs", "knip-preprocessor-package"],
+        "preprocessor_options": { "key": "value" },
         "diagnostics": {
           "include_issue_types": ["files", "dependencies"],
           "exclude_issue_types": ["duplicates"],
@@ -55,6 +57,16 @@ Configure the extension under `lsp.knip` in your Zed `settings.json`.
 | `diagnostics.exclude_issue_types` | `array` | `[]` | Issue types to exclude (wins over include). **Requires Managed Install.** |
 | `diagnostics.exclude_path_prefixes` | `array` | `[]` | POSIX-normalized path prefixes to ignore. **Requires Managed Install.** |
 | `diagnostics.severity_by_issue_type` | `object` | `{}` | Map of issue types to severity levels. **Requires Managed Install.** |
+| `preprocessor` | `array` | `[]` | List of preprocessor scripts or packages to run. **Requires Managed Install.** |
+| `preprocessor_options` | `object` | `{}` | Options passed to preprocessors. **Requires Managed Install.** |
+
+### Trusted Code Warning
+
+Preprocessors execute trusted workspace or package JavaScript. Only use preprocessors in repositories you trust.
+
+### Managed Install Requirement
+
+Preprocessors require a **Managed Install** of Knip. Using a custom `lsp.knip.binary.path` will cause preprocessor settings to be ignored.
 
 ### `lsp.knip.binary`
 
@@ -90,9 +102,10 @@ The following 15 issue types are supported:
 
 ## Limitations
 
-- `lsp.knip.binary.arguments` is rejected. The Knip language server only recognizes transport flags (e.g., `--stdio`).
-- CLI preprocessors and reporters are NOT available in the editor workflow.
+- Reporters are NOT available in the editor workflow.
+- Preprocessors are supported only via `lsp.knip.settings` and require a Managed Install.
 - Alternate TS configuration is handled via `ts_config_path` (Managed Install only) instead of launch arguments.
+- `lsp.knip.binary.arguments` is rejected. The Knip language server only recognizes transport flags (e.g., `--stdio`).
 - Removed settings such as explicit server path overrides in settings, log levels, or package manager overrides are rejected.
 
 ## Development

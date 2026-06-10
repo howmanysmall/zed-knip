@@ -32,6 +32,8 @@ Statuses marked **harness-confirmed** are validated by `tests/lsp_parity.rs` (ru
 | `knip.requireConfig` | `package.json` | `settings.json` | `implemented` | ✓ | |
 | `knip.configFilePath` | `package.json` | `settings.json` | `implemented` | ✓ | |
 | `knip.nodeRuntimePath` | `package.json` | `settings.json` | `implemented` | ✓ | |
+| `knip.preprocessor` | `package.json` | `settings.json` | `implemented` | ✓ | Managed Install only. |
+| `knip.preprocessorOptions` | `package.json` | `settings.json` | `implemented` | ✓ | Managed Install only. |
 | **Commands** | | | | | |
 | `knip.start` | `index.js` | Slash Command | `zed-equivalent` | ✓ | Map to `/knip-start`. |
 | `knip.restart` | `index.js` | Slash Command | `zed-equivalent` | ✓ | Map to `/knip-restart`. |
@@ -60,7 +62,7 @@ Statuses marked **harness-confirmed** are validated by `tests/lsp_parity.rs` (ru
 
 | Status | Count |
 | :--- | :--- |
-| `implemented` | 15 |
+| `implemented` | 17 |
 | `zed-equivalent` | 9 |
 | `unsupported` | 2 |
 | `MCP-excluded` | 3 |

@@ -635,6 +635,8 @@ fn parity_matrix() -> Vec<(&'static str, ParityStatus)> {
 		("setting-require-config", ParityStatus::Implemented),
 		("setting-config-file-path", ParityStatus::Implemented),
 		("setting-node-runtime-path", ParityStatus::Implemented),
+		("setting-preprocessor", ParityStatus::Implemented),
+		("setting-preprocessor-options", ParityStatus::Implemented),
 		// Commands — start/restart use Zed's standard LSP commands; the rest
 		// (show-hover, expand-all) are upstream-only custom commands with no
 		// Zed equivalent.
@@ -688,8 +690,8 @@ fn lsp_parity_matrix_implemented_count_matches_expected() {
 	let matrix = parity_matrix();
 	let implemented = matrix.iter().filter(|(_, s)| *s == ParityStatus::Implemented).count();
 
-	// 4 diagnostics + 3 code actions + 4 settings + 2 lifecycle = 13
-	assert_eq!(implemented, 13, "expected 13 implemented features");
+	// 4 diagnostics + 3 code actions + 6 settings + 2 lifecycle = 15
+	assert_eq!(implemented, 15, "expected 15 implemented features");
 }
 
 #[test]
