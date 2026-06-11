@@ -720,3 +720,18 @@ fn lsp_parity_matrix_mcp_excluded_count_matches_expected() {
 
 	assert_eq!(mcp, 3, "expected 3 MCP-excluded features");
 }
+
+#[test]
+fn parity_matrix_docs_summary_counts_match_ground_truth() {
+	let docs = include_str!("../docs/parity-matrix.md");
+
+	for (status, count) in [
+		("implemented", 15),
+		("zed-equivalent", 2),
+		("unsupported", 9),
+		("MCP-excluded", 3),
+	] {
+		let row = format!("| `{status}` | {count} |");
+		assert!(docs.contains(&row), "docs parity summary must contain row: {row}");
+	}
+}

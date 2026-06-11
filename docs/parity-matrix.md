@@ -62,9 +62,9 @@ Statuses marked **harness-confirmed** are validated by `tests/lsp_parity.rs` (ru
 
 | Status | Count |
 | :--- | :--- |
-| `implemented` | 17 |
-| `zed-equivalent` | 9 |
-| `unsupported` | 2 |
+| `implemented` | 15 |
+| `zed-equivalent` | 2 |
+| `unsupported` | 9 |
 | `MCP-excluded` | 3 |
 
 ## UI Limitations

@@ -191,6 +191,26 @@ fn readme_preprocessor_must_not_guide_launch_args() {
 }
 
 #[test]
+fn readme_preprocessor_custom_binary_documents_hard_error_not_ignored() {
+	let content = include_str!("../README.md");
+	let section = content
+		.split("### Managed Install Requirement")
+		.nth(1)
+		.and_then(|tail| tail.split("### `lsp.knip.binary`").next())
+		.expect("README must document the preprocessor Managed Install Requirement section");
+	let section_lower = section.to_lowercase();
+
+	assert!(
+		section_lower.contains("rejected") && section_lower.contains("hard error"),
+		"preprocessor managed-install section must say custom binary conflicts are rejected with a hard error"
+	);
+	assert!(
+		!section_lower.contains("ignored"),
+		"preprocessor managed-install section must not say preprocessor settings are ignored"
+	);
+}
+
+#[test]
 fn extension_manifest_process_args_uses_stdio_only() {
 	let content = include_str!("../extension.toml");
 	assert!(

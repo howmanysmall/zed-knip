@@ -66,7 +66,7 @@ Preprocessors execute trusted workspace or package JavaScript. Only use preproce
 
 ### Managed Install Requirement
 
-Preprocessors require a **Managed Install** of Knip. Using a custom `lsp.knip.binary.path` will cause preprocessor settings to be ignored.
+Preprocessors require a **Managed Install** of Knip. Setting `lsp.knip.binary.path` while `preprocessor` or `preprocessor_options` are configured is rejected with a hard error.
 
 ### `lsp.knip.binary`
 

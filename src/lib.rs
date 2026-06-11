@@ -248,9 +248,9 @@ fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Val
 					.preprocessor_options
 					.as_ref()
 					.map(|opts| {
-						let sorted_keys: std::collections::BTreeMap<String, ()> =
-							opts.keys().map(|k| (k.clone(), ())).collect();
-						zed::serde_json::to_string(&sorted_keys).unwrap_or_default()
+						let sorted: std::collections::BTreeMap<String, &zed::serde_json::Value> =
+							opts.iter().map(|(k, v)| (k.clone(), v)).collect();
+						zed::serde_json::to_string(&sorted).unwrap_or_default()
 					})
 					.unwrap_or_default();
 				format!("{}:{}", prepjoined, opts_fingerprint)
@@ -315,7 +315,33 @@ fn settings_for_worktree(
 	}
 
 	settings.validate().map_err(|error| error.to_string())?;
+	validate_workspace_local_preprocessors(&settings.preprocessor)?;
 	Ok(settings)
+}
+
+fn validate_workspace_local_preprocessors(preprocessors: &[String]) -> zed::Result<()> {
+	for spec in preprocessors {
+		if !spec.starts_with("./") {
+			continue;
+		}
+
+		let mut depth = 0_usize;
+		for component in std::path::Path::new(spec).components() {
+			match component {
+				Component::CurDir => {}
+				Component::Normal(_) => depth += 1,
+				Component::ParentDir if depth > 0 => depth -= 1,
+				Component::ParentDir => {
+					return Err(format!("preprocessor specifier '{}' escapes the workspace root", spec));
+				}
+				_ => {
+					return Err(format!("preprocessor specifier '{}' escapes the workspace root", spec));
+				}
+			}
+		}
+	}
+
+	Ok(())
 }
 
 fn validate_config_path(config_path: &str, workspace_root: &std::path::Path) -> Result<PathBuf, KnipError> {
@@ -1232,6 +1258,39 @@ mod tests {
 	}
 
 	#[test]
+	fn preprocessor_settings_reject_path_escape_via_dotdot_in_dot_path() {
+		let worktree = TestWorktree::new("preprocessor-dotdot-escape");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			preprocessor: vec!["./../escape.js".to_string()],
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor") && error.contains("escapes the workspace root"),
+			"error must reject workspace-root escape, got: {error}"
+		);
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_workspace_local_path() {
+		let worktree = TestWorktree::new("preprocessor-local-path");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			preprocessor: vec!["./local.js".to_string()],
+			..KnipSettings::default()
+		});
+
+		let resolved = settings_for_worktree(&worktree, settings).unwrap();
+
+		assert_eq!(resolved.preprocessor, vec!["./local.js".to_string()]);
+	}
+
+	#[test]
 	fn custom_binary_path_supports_baseline_stdio_launch() {
 		let worktree = TestWorktree::new("custom-baseline-stdio");
 		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
@@ -1404,6 +1463,45 @@ mod tests {
 			"fingerprint must change when options are added: {} vs {}",
 			fp1, fp3
 		);
+		assert_eq!(
+			fp3, "a|b:{\"opt\":\"val\"}",
+			"fingerprint must serialize sorted option key-value pairs"
+		);
+	}
+
+	#[test]
+	fn preprocessor_fingerprint_changes_when_option_values_differ() {
+		let settings1 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": { "a": 1 }
+			})),
+		})
+		.unwrap();
+		let config1 = knip_workspace_configuration(&settings1);
+		let fp1 = config1["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		let settings2 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": { "a": 2 }
+			})),
+		})
+		.unwrap();
+		let config2 = knip_workspace_configuration(&settings2);
+		let fp2 = config2["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp2,
+			"fingerprint must change when option values differ: {} vs {}",
+			fp1, fp2
+		);
+		assert_eq!(fp1, "prep:{\"a\":1}");
+		assert_eq!(fp2, "prep:{\"a\":2}");
 	}
 
 	#[test]
