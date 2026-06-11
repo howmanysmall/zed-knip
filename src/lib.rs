@@ -1444,4 +1444,123 @@ mod tests {
 			"env must be empty; preprocessor config flows through LSP initialization options"
 		);
 	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["echo".to_string(), "setup".to_string()],
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor"),
+			"error must mention preprocessor, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor_options() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor-options");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		use std::collections::BTreeMap;
+		let mut opts = BTreeMap::new();
+		opts.insert("verbose".to_string(), zed::serde_json::Value::Bool(true));
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["./local-preprocessor".to_string()],
+			preprocessor_options: Some(opts),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor_options"),
+			"error must mention preprocessor_options, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor_and_options() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor-both");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		use std::collections::BTreeMap;
+		let mut opts = BTreeMap::new();
+		opts.insert("verbose".to_string(), zed::serde_json::Value::Bool(false));
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["echo".to_string()],
+			preprocessor_options: Some(opts),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor") && error.contains("preprocessor_options"),
+			"error must mention both preprocessor settings, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_auto_install_works() {
+		let worktree = TestWorktree::new("managed-preprocessor-works");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+		let managed = worktree.executable("managed/knip-language-server");
+
+		let settings = KnipSettings {
+			preprocessor: vec!["echo".to_string()],
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let installer = MockManagedInstall { path: managed.clone() };
+		let resolved = resolve_knip(&settings, &cache, &installer).unwrap();
+
+		assert_eq!(
+			resolved.executable_path, managed,
+			"resolver must use managed install when preprocessor is configured without custom binary"
+		);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
+	}
 }
