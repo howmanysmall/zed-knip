@@ -220,6 +220,44 @@ fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Val
 		if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
 			zed_knip["tsConfigFilePath"] = zed::serde_json::Value::String(ts_config_path.to_string());
 		}
+
+		{
+			let prep_array: Vec<zed::serde_json::Value> = settings
+				.preprocessor
+				.iter()
+				.map(|s| zed::serde_json::Value::String(s.clone()))
+				.collect();
+			zed_knip["preprocessor"] = zed::serde_json::Value::Array(prep_array);
+
+			let opts_obj = settings
+				.preprocessor_options
+				.as_ref()
+				.map(|opts| {
+					let map: std::collections::BTreeMap<String, zed::serde_json::Value> =
+						opts.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+					zed::serde_json::to_value(map).unwrap_or(zed::serde_json::Value::Object(Default::default()))
+				})
+				.unwrap_or(zed::serde_json::Value::Object(Default::default()));
+			zed_knip["preprocessorOptions"] = opts_obj;
+
+			let prep_fingerprint = if settings.preprocessor.is_empty() {
+				String::new()
+			} else {
+				let prepjoined = settings.preprocessor.join("|");
+				let opts_fingerprint = settings
+					.preprocessor_options
+					.as_ref()
+					.map(|opts| {
+						let sorted_keys: std::collections::BTreeMap<String, ()> =
+							opts.keys().map(|k| (k.clone(), ())).collect();
+						zed::serde_json::to_string(&sorted_keys).unwrap_or_default()
+					})
+					.unwrap_or_default();
+				format!("{}:{}", prepjoined, opts_fingerprint)
+			};
+			zed_knip["preprocessorFingerprint"] = zed::serde_json::Value::String(prep_fingerprint);
+		}
+
 		config["zedKnip"] = zed_knip;
 	}
 
@@ -447,6 +485,17 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 	}
 	if let Some(diag_value) = settings.get("diagnostics") {
 		overrides.diagnostics = parse_diagnostics_settings(diag_value)?;
+	}
+	if let Some(prep_value) = settings.get("preprocessor") {
+		let preprocessors: Vec<String> = zed::serde_json::from_value(prep_value.clone())
+			.map_err(|e| format!("invalid preprocessor setting: {}", e))?;
+		overrides.preprocessor = preprocessors;
+	}
+	if let Some(opts_value) = settings.get("preprocessor_options") {
+		let opts: Option<std::collections::BTreeMap<String, zed::serde_json::Value>> =
+			zed::serde_json::from_value(opts_value.clone())
+				.map_err(|e| format!("invalid preprocessor_options setting: {}", e))?;
+		overrides.preprocessor_options = opts;
 	}
 
 	Ok(())
@@ -1239,6 +1288,160 @@ mod tests {
 		assert!(
 			error.contains("binary.path"),
 			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn preprocessor_configuration_emits_array_in_order() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["./tools/prep1.mjs", "prep-package", "@scope/prep2"]
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		let prep_array = config["zedKnip"]["preprocessor"].as_array().unwrap();
+		assert_eq!(prep_array.len(), 3, "preprocessor array must have 3 entries");
+		assert_eq!(prep_array[0].as_str(), Some("./tools/prep1.mjs"));
+		assert_eq!(prep_array[1].as_str(), Some("prep-package"));
+		assert_eq!(prep_array[2].as_str(), Some("@scope/prep2"));
+	}
+
+	#[test]
+	fn preprocessor_options_serialized_as_object() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": {
+					"key1": "value1",
+					"key2": 42
+				}
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		let opts_obj = config["zedKnip"]["preprocessorOptions"].as_object().unwrap();
+		assert_eq!(opts_obj.get("key1").map(|v| v.as_str()), Some(Some("value1")));
+		assert_eq!(opts_obj.get("key2").map(|v| v.as_i64()), Some(Some(42)));
+	}
+
+	#[test]
+	fn preprocessor_options_default_to_empty_object() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"]
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		assert!(
+			config["zedKnip"]["preprocessorOptions"].is_object(),
+			"preprocessorOptions must be an object even when not configured"
+		);
+		let opts_obj = config["zedKnip"]["preprocessorOptions"].as_object().unwrap();
+		assert!(
+			opts_obj.is_empty(),
+			"preprocessorOptions must be empty object when not configured"
+		);
+	}
+
+	#[test]
+	fn preprocessor_fingerprint_changes_with_list_order_and_options() {
+		let settings1 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["a", "b"]
+			})),
+		})
+		.unwrap();
+		let config1 = knip_workspace_configuration(&settings1);
+		let fp1 = config1["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		let settings2 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["b", "a"]
+			})),
+		})
+		.unwrap();
+		let config2 = knip_workspace_configuration(&settings2);
+		let fp2 = config2["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp2,
+			"fingerprint must change when preprocessor order changes: {} vs {}",
+			fp1, fp2
+		);
+
+		let settings3 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["a", "b"],
+				"preprocessor_options": { "opt": "val" }
+			})),
+		})
+		.unwrap();
+		let config3 = knip_workspace_configuration(&settings3);
+		let fp3 = config3["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp3,
+			"fingerprint must change when options are added: {} vs {}",
+			fp1, fp3
+		);
+	}
+
+	#[test]
+	fn preprocessor_hard_launch_preserves_stdio_args_and_empty_env() {
+		let worktree = TestWorktree::new("preprocessor-stdio-launch");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+
+		let settings = KnipSettings {
+			preprocessor: vec!["./tools/prep.mjs".to_string()],
+			preprocessor_options: Some(std::collections::BTreeMap::from([(
+				"key".to_string(),
+				zed::serde_json::json!("value"),
+			)])),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let fake_command = zed::Command {
+			command: worktree.root.join("managed/knip-language-server").display().to_string(),
+			args: vec!["--stdio".to_string()],
+			env: vec![],
+		};
+		let resolver = MockResolver {
+			result: Ok(fake_command),
+		};
+
+		let command = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap();
+
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio']; preprocessors flow through LSP config, not CLI args"
+		);
+		assert!(
+			command.env.is_empty(),
+			"env must be empty; preprocessor config flows through LSP initialization options"
 		);
 	}
 }
