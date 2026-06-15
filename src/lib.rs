@@ -290,8 +290,7 @@ fn settings_for_worktree(
 
 	let workspace_root = worktree.root_path();
 	if settings.config_path.is_none() {
-		settings.config_path = detect_config_for_worktree(worktree)
-			.map(|relative_path| workspace_root.join(relative_path).display().to_string());
+		settings.config_path = detect_config_for_worktree(worktree).map(|s| s.to_string());
 	}
 
 	if settings.require_config && settings.config_path.is_none() {
@@ -302,12 +301,12 @@ fn settings_for_worktree(
 	}
 
 	if let Some(config_path) = settings.config_path.as_deref() {
-		let resolved = validate_config_path(config_path, &workspace_root).map_err(|error| error.to_string())?;
+		let resolved = validate_config_path(config_path, worktree).map_err(|error| error.to_string())?;
 		settings.config_path = Some(resolved.display().to_string());
 	}
 
 	if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
-		validate_ts_config_path(ts_config_path, &workspace_root)?;
+		validate_ts_config_path(ts_config_path, worktree)?;
 	}
 
 	if settings.package_manager.is_none() {
@@ -344,7 +343,8 @@ fn validate_workspace_local_preprocessors(preprocessors: &[String]) -> zed::Resu
 	Ok(())
 }
 
-fn validate_config_path(config_path: &str, workspace_root: &std::path::Path) -> Result<PathBuf, KnipError> {
+fn validate_config_path(config_path: &str, worktree: &impl WorktreeAdapter) -> Result<PathBuf, KnipError> {
+	let workspace_root = worktree.root_path();
 	let path = std::path::Path::new(config_path);
 	let resolved = if path.is_absolute() {
 		path.to_path_buf()
@@ -352,7 +352,21 @@ fn validate_config_path(config_path: &str, workspace_root: &std::path::Path) -> 
 		workspace_root.join(path)
 	};
 
-	if !resolved.is_file() {
+	// Compute a workspace-relative path for the sandbox-safe read_text_file check.
+	// If the resolved path is under workspace_root, strip the prefix so read_text_file
+	// gets a relative path. Otherwise (absolute path outside workspace), fall back to
+	// the absolute path string — worktree.read_text_file on an absolute path outside the
+	// workspace will return None, which is the correct outcome for a non-existent file.
+	let relative_for_read = if resolved.starts_with(&workspace_root) {
+		resolved.strip_prefix(&workspace_root).unwrap_or(&resolved).as_os_str()
+	} else {
+		resolved.as_os_str()
+	};
+
+	if worktree
+		.read_text_file(relative_for_read.to_str().unwrap_or(config_path))
+		.is_none()
+	{
 		return Err(KnipError::InvalidConfig {
 			path: resolved.clone(),
 			reason: format!(
@@ -365,7 +379,7 @@ fn validate_config_path(config_path: &str, workspace_root: &std::path::Path) -> 
 	Ok(resolved)
 }
 
-fn validate_ts_config_path(ts_config_path: &str, workspace_root: &std::path::Path) -> zed::Result<()> {
+fn validate_ts_config_path(ts_config_path: &str, worktree: &impl WorktreeAdapter) -> zed::Result<()> {
 	if ts_config_path.is_empty() {
 		return Err(KnipError::InvalidTsConfigPath {
 			path: PathBuf::from(""),
@@ -392,8 +406,8 @@ fn validate_ts_config_path(ts_config_path: &str, workspace_root: &std::path::Pat
 		.to_string());
 	}
 
-	let full_path = workspace_root.join(path);
-	if !full_path.is_file() {
+	if worktree.read_text_file(ts_config_path).is_none() {
+		let full_path = worktree.root_path().join(path);
 		return Err(KnipError::InvalidTsConfigPath {
 			path: path.to_path_buf(),
 			reason: format!("file not found at {}", full_path.display()),
