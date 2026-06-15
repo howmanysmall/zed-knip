@@ -19,6 +19,8 @@ const LANGUAGE_SERVER_BIN: &str = "knip-language-server";
 const LANGUAGE_SERVER_PACKAGE: &str = "@knip/language-server";
 const MANAGED_LANGUAGE_SERVER_BIN: &str = "node_modules/.bin/knip-language-server";
 pub(crate) const DID_SAVE_REFRESH_PATCH_MARKER: &str = "zed-knip: refresh Knip diagnostics on textDocument/didSave";
+pub(crate) const EDITOR_WORKFLOW_PATCH_MARKER: &str = "zed-knip: editor workflow patch";
+pub const PREPROCESSOR_PATCH_MARKER: &str = "// ZED-KNIP: preprocessor patch v1";
 const DEFAULT_MANAGED_VERSION: &str = "latest";
 
 /// Resolves or installs a managed Knip language-server binary for a workspace.
@@ -85,19 +87,41 @@ impl ManagedInstall for ZedNpmManagedInstall {
 
 pub(crate) fn patch_managed_language_server(executable_path: &Path) -> Result<(), KnipError> {
 	let server_path = managed_language_server_server_path(executable_path)?;
-	let source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
+	let mut source = fs::read_to_string(&server_path).map_err(|error| KnipError::FailedManagedInstall {
 		reason: format!("failed to read managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
 	})?;
-	let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
-		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
-	})?
-	else {
-		return Ok(());
-	};
+	let mut changed = false;
 
-	fs::write(&server_path, patched).map_err(|error| KnipError::FailedManagedInstall {
-		reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
-	})
+	if let Some(patched) = apply_did_save_refresh_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+	})? {
+		source = patched;
+		changed = true;
+	}
+
+	if let Some(patched) = apply_editor_workflow_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+		reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+	})? {
+		source = patched;
+		changed = true;
+	}
+
+	if source.contains("KNIP_CONFIG_LOCATIONS") || source.contains(PREPROCESSOR_PATCH_MARKER) {
+		if let Some(patched) = apply_preprocessor_patch(&source).map_err(|reason| KnipError::FailedManagedInstall {
+			reason: format!("failed to patch managed {LANGUAGE_SERVER_PACKAGE} server: {reason}"),
+		})? {
+			source = patched;
+			changed = true;
+		}
+	}
+
+	if changed {
+		fs::write(&server_path, source).map_err(|error| KnipError::FailedManagedInstall {
+			reason: format!("failed to write managed {LANGUAGE_SERVER_PACKAGE} server: {error}"),
+		})?;
+	}
+
+	Ok(())
 }
 
 fn managed_language_server_server_path(executable_path: &Path) -> Result<PathBuf, KnipError> {
@@ -141,6 +165,89 @@ pub(crate) fn apply_did_save_refresh_patch(source: &str) -> Result<Option<String
 	)?;
 
 	Ok(Some(patched))
+}
+
+pub(crate) fn apply_editor_workflow_patch(source: &str) -> Result<Option<String>, String> {
+	if source.contains(EDITOR_WORKFLOW_PATCH_MARKER) {
+		return Ok(None);
+	}
+
+	let patched = replace_once(
+		source,
+		"args: { config: configFilePath }",
+		"args: { config: configFilePath, ...(config?.zedKnip?.tsConfigFilePath ? { tsConfig: config.zedKnip.tsConfigFilePath } : {}) }",
+		"createOptions editor-workflow",
+	)?;
+
+	let diag_replacement = format!(
+		"          const document = this.documents.get(uri);\n          // {EDITOR_WORKFLOW_PATCH_MARKER}\n          if (config?.zedKnip?.diagnostics) {{\n            const _d = config.zedKnip.diagnostics;\n            const _inc = _d.includeIssueTypes ?? [];\n            const _exc = _d.excludeIssueTypes ?? [];\n            const _pfx = _d.excludePathPrefixes ?? [];\n            const _sev = _d.severityByIssueType ?? {{}};\n            if (_inc.length > 0 && !_inc.includes(issue.type)) continue;\n            if (_exc.includes(issue.type)) continue;\n            if (_pfx.length > 0) {{\n              const _rel = path.relative(this.cwd ?? process.cwd(), issue.filePath).split(path.sep).join('/');\n              if (_pfx.some(p => _rel === p || _rel.startsWith(p + '/'))) continue;\n            }}\n            if (_sev[issue.type] === 'off') continue;\n          }}\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n          if (config?.zedKnip?.diagnostics) {{\n            const _s = (config.zedKnip.diagnostics.severityByIssueType ?? {{}})[issue.type];\n            if (_s && _s !== 'off') {{\n              const _map = {{ error: 1, warn: 2, info: 3, hint: 4 }};\n              if (_map[_s] !== undefined) diagnostic.severity = _map[_s];\n            }}\n          }}"
+	);
+
+	let patched = replace_once(
+		&patched,
+		"          const document = this.documents.get(uri);\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);",
+		&diag_replacement,
+		"buildDiagnostics editor-workflow",
+	)?;
+
+	Ok(Some(patched))
+}
+
+pub fn apply_preprocessor_patch(source: &str) -> Result<Option<String>, String> {
+	if source.contains(PREPROCESSOR_PATCH_MARKER) {
+		return Ok(None);
+	}
+
+	let helpers = format!(
+		"const RESTART_FOR = new Set(['package.json', ...KNIP_CONFIG_LOCATIONS]);\n\n{PREPROCESSOR_PATCH_MARKER}\nconst PREPROCESSOR_PATCH_FAILED_FINGERPRINT = '__zed_knip_preprocessor_failed__';\n\n/** @param {{ zedKnip?: {{ preprocessor?: unknown, preprocessorOptions?: unknown, preprocessorFingerprint?: unknown }} }} config */\nfunction normalizeZedKnipPreprocessorConfig(config) {{\n  const zedKnip = config?.zedKnip ?? {{}};\n  const preprocessors = Array.isArray(zedKnip.preprocessor)\n    ? zedKnip.preprocessor.filter(spec => typeof spec === 'string' && spec.length > 0)\n    : [];\n  const preprocessorOptions =\n    zedKnip.preprocessorOptions && typeof zedKnip.preprocessorOptions === 'object' && !Array.isArray(zedKnip.preprocessorOptions)\n      ? zedKnip.preprocessorOptions\n      : {{}};\n  const fingerprint = typeof zedKnip.preprocessorFingerprint === 'string'\n    ? zedKnip.preprocessorFingerprint\n    : `${{preprocessors.join('|')}}:${{JSON.stringify(Object.fromEntries(Object.entries(preprocessorOptions).sort()))}}`;\n  return {{ preprocessors, preprocessorOptions, fingerprint }};\n}}\n\n/** @param {{ kind: 'local' | 'package', url: string, spec: string }} resolved */\nasync function importZedKnipPreprocessor(resolved) {{\n  try {{\n    return await import(resolved.url);\n  }} catch (error) {{\n    throw new Error(`Failed to import preprocessor '${{resolved.spec}}' from ${{resolved.url}}: ${{error?.message ?? error}}`);\n  }}\n}}\n\n/** @param {{ cwd: string, spec: string }} input */\nfunction resolveZedKnipPreprocessor(input) {{\n  const {{ spec, cwd }} = input;\n  if (spec.startsWith('./')) {{\n    return {{ kind: 'local', url: pathToFileURL(path.resolve(cwd, spec)).href, spec }};\n  }}\n  const resolved = createRequire(path.join(cwd, 'package.json')).resolve(spec);\n  return {{ kind: 'package', url: pathToFileURL(resolved).href, spec }};\n}}\n\n/** @param {{ cwd: string, spec: string }} input */\nasync function loadZedKnipPreprocessor(input) {{\n  const resolved = resolveZedKnipPreprocessor(input);\n  const module = await importZedKnipPreprocessor(resolved);\n  const preprocessor = module.default ?? module;\n  if (typeof preprocessor !== 'function') {{\n    throw new Error(`Preprocessor '${{input.spec}}' must export a function`);\n  }}\n  return preprocessor;\n}}\n\nfunction buildZedKnipReporterOptions(rawResults, session, config, configFilePath) {{\n  return {{\n    report: {{}},\n    counters: {{ processed: 0, total: 0 }},\n    tagHints: new Set(),\n    configurationHints: [],\n    enabledPlugins: {{}},\n    isDisableConfigHints: false,\n    isDisableTagHints: false,\n    isTreatConfigHintsAsErrors: false,\n    isTreatTagHintsAsErrors: false,\n    isProduction: false,\n    isShowProgress: false,\n    options: '',\n    includedWorkspaceDirs: [],\n    selectedWorkspaces: undefined,\n    maxShowIssues: undefined,\n    ...(rawResults ?? {{}}),\n    issues: session.getIssues().issues,\n    cwd: this.cwd ?? process.cwd(),\n    preprocessorOptions: config?.zedKnip?.preprocessorOptions ?? {{}},\n    configFilePath,\n  }};\n}}\n\nasync function runZedKnipPreprocessors(preprocessors, reporterOptions, cwd) {{\n  let currentReporterOptions = reporterOptions;\n  for (const spec of preprocessors) {{\n    const preprocessor = await loadZedKnipPreprocessor({{ spec, cwd }});\n    const nextReporterOptions = await Promise.resolve(preprocessor(currentReporterOptions));\n    if (nextReporterOptions === null || nextReporterOptions === undefined || typeof nextReporterOptions !== 'object') {{\n      throw new Error(`Preprocessor '${{spec}}' must return a reporter options object`);\n    }}\n    if (!('issues' in nextReporterOptions)) {{\n      throw new Error(`Preprocessor '${{spec}}' must return reporter options with an issues field`);\n    }}\n    currentReporterOptions = nextReporterOptions;\n  }}\n  return currentReporterOptions;\n}}"
+	);
+
+	let mut patched = replace_preprocessor_anchor(
+		source,
+		"const RESTART_FOR = new Set(['package.json', ...KNIP_CONFIG_LOCATIONS]);",
+		&helpers,
+		"helpers",
+	)?;
+	patched = replace_preprocessor_anchor(
+		&patched,
+		"  /** @type {Map<string, import('vscode-languageserver').Diagnostic[]>} */\n  cycleDiagnostics = new Map();",
+		"  /** @type {Map<string, import('vscode-languageserver').Diagnostic[]>} */\n  cycleDiagnostics = new Map();\n\n  zedKnipPreprocessorFingerprint = null;\n\n  zedKnipTransformedIssues = null;\n\n  zedKnipTransformedResults = null;",
+		"class state",
+	)?;
+	patched = replace_preprocessor_anchor(
+		&patched,
+		"      const session = await knip.createSession(options);\n      this.connection.console.log(`Finished building module graph (${Date.now() - start}ms)`);\n\n      this.session = session;",
+		"      const session = await knip.createSession(options);\n      this.connection.console.log(`Finished building module graph (${Date.now() - start}ms)`);\n\n      this.initConfig = config;\n      this.zedKnipPreprocessorFingerprint = null;\n      this.zedKnipTransformedIssues = null;\n      this.zedKnipTransformedResults = null;\n      const zedKnipPreprocessorConfig = normalizeZedKnipPreprocessorConfig(config);\n      if (zedKnipPreprocessorConfig.preprocessors.length > 0) {\n        try {\n          const reporterOptions = buildZedKnipReporterOptions.call(this, session.getResults(), session, config, configFilePath);\n          const output = await runZedKnipPreprocessors(\n            zedKnipPreprocessorConfig.preprocessors,\n            reporterOptions,\n            this.cwd ?? process.cwd()\n          );\n          this.zedKnipTransformedIssues = output.issues;\n          this.zedKnipTransformedResults = output;\n          this.zedKnipPreprocessorFingerprint = zedKnipPreprocessorConfig.fingerprint;\n        } catch (error) {\n          this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT;\n          this.zedKnipTransformedIssues = null;\n          this.zedKnipTransformedResults = null;\n          const message = `Knip preprocessor failed: ${error?.message ?? error}`;\n          this.connection.console.error(message);\n          if (this.connection.window?.showMessage) {\n            this.connection.window.showMessage(1, message);\n          }\n        }\n      }\n\n      this.session = session;",
+		"start path",
+	)?;
+	patched = replace_preprocessor_anchor(
+		&patched,
+		"      this.publishDiagnostics(this.buildDiagnostics(session.getIssues().issues, config, this.rules));",
+		"      const zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null\n        ? this.zedKnipTransformedIssues\n        : zedKnipPreprocessorConfig.preprocessors.length > 0\n          ? {}\n          : session.getIssues().issues;\n      this.publishDiagnostics(this.buildDiagnostics(zedKnipDiagnosticsIssues, config, this.rules));",
+		"diagnostic publish path",
+	)?;
+	patched = replace_preprocessor_anchor(
+		&patched,
+		"  getResults() {\n    if (!this.session) return null;\n    return this.session.getResults();\n  }",
+		"  getResults() {\n    if (!this.session) return null;\n    const { fingerprint, preprocessors } = normalizeZedKnipPreprocessorConfig(this.initConfig ?? {});\n    if (this.zedKnipPreprocessorFingerprint !== fingerprint) {\n      this.zedKnipTransformedResults = null;\n      this.zedKnipTransformedIssues = null;\n      this.zedKnipPreprocessorFingerprint = fingerprint;\n    }\n    if (this.zedKnipTransformedResults !== null) return this.zedKnipTransformedResults;\n    if (preprocessors.length > 0 || this.zedKnipPreprocessorFingerprint === PREPROCESSOR_PATCH_FAILED_FINGERPRINT) return null;\n    return this.session.getResults();\n  }",
+		"results path",
+	)?;
+	patched = replace_preprocessor_anchor(
+		&patched,
+		"      const result = await this.session.handleFileChanges(changes);\n\n      if (!result) return;\n\n      this.connection.console.log(\n        `Module graph updated (${Math.floor(result.duration)}ms • ${(result.mem / 1024 / 1024).toFixed(2)}M)`\n      );\n\n      const config = await this.getConfig();\n      this.publishDiagnostics(this.buildDiagnostics(this.session.getIssues().issues, config, this.rules));",
+		"      const result = await this.session.handleFileChanges(changes);\n\n      const config = await this.getConfig();\n      this.initConfig = config;\n      const zedKnipPreprocessorConfig = normalizeZedKnipPreprocessorConfig(config);\n      if (this.zedKnipPreprocessorFingerprint !== zedKnipPreprocessorConfig.fingerprint) {\n        this.zedKnipPreprocessorFingerprint = null;\n        this.zedKnipTransformedIssues = null;\n        this.zedKnipTransformedResults = null;\n      }\n      if (zedKnipPreprocessorConfig.preprocessors.length > 0 && result) {\n        try {\n          const reporterOptions = buildZedKnipReporterOptions.call(this, this.session.getResults(), this.session, config, config.configFilePath);\n          const output = await runZedKnipPreprocessors(\n            zedKnipPreprocessorConfig.preprocessors,\n            reporterOptions,\n            this.cwd ?? process.cwd()\n          );\n          this.zedKnipTransformedIssues = output.issues;\n          this.zedKnipTransformedResults = output;\n          this.zedKnipPreprocessorFingerprint = zedKnipPreprocessorConfig.fingerprint;\n        } catch (error) {\n          this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT;\n          this.zedKnipTransformedIssues = null;\n          this.zedKnipTransformedResults = null;\n          const message = `Knip preprocessor failed after file changes: ${error?.message ?? error}`;\n          this.connection.console.error(message);\n          if (this.connection.window?.showMessage) {\n            this.connection.window.showMessage(1, message);\n          }\n          this.publishDiagnostics(new Map());\n          return null;\n        }\n      }\n\n      if (!result) return;\n\n      this.connection.console.log(\n        `Module graph updated (${Math.floor(result.duration)}ms • ${(result.mem / 1024 / 1024).toFixed(2)}M)`\n      );\n\n      const zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null\n        ? this.zedKnipTransformedIssues\n        : zedKnipPreprocessorConfig.preprocessors.length > 0\n          ? {}\n          : this.session.getIssues().issues;\n      this.publishDiagnostics(this.buildDiagnostics(zedKnipDiagnosticsIssues, config, this.rules));",
+		"file-change path",
+	)?;
+
+	Ok(Some(patched))
+}
+
+fn replace_preprocessor_anchor(source: &str, needle: &str, replacement: &str, label: &str) -> Result<String, String> {
+	if !source.contains(needle) {
+		return Err(format!("missing preprocessor patch anchor: {label}"));
+	}
+
+	Ok(source.replacen(needle, replacement, 1))
 }
 
 fn replace_once(source: &str, needle: &str, replacement: &str, label: &str) -> Result<String, String> {
@@ -495,7 +602,10 @@ fn worktree_cache_key(worktree_root: &Path) -> String {
 mod tests {
 	use super::*;
 	use crate::settings::LogLevel;
-	use std::{cell::RefCell, os::unix::fs::PermissionsExt, time::SystemTime};
+	use std::{cell::RefCell, os::unix::fs::symlink, os::unix::fs::PermissionsExt, time::SystemTime};
+
+	const MANAGED_SERVER_FIXTURE: &str =
+		include_str!("../tests/fixtures/managed-server/knip-language-server-server.js");
 
 	#[derive(Debug)]
 	struct TestWorkspace {
@@ -800,5 +910,463 @@ mod tests {
 		assert!(cache_dir.starts_with(workspace.cache_root()));
 		assert!(other_cache_dir.starts_with(workspace.cache_root()));
 		assert_ne!(cache_dir, other_cache_dir);
+	}
+
+	const EDITOR_WORKFLOW_SOURCE: &str = concat!(
+		"import path from 'node:path';\n",
+		"buildDiagnostics(issues, config, rules) {\n",
+		"  for (const issue of Object.values(issuesForFile)) {\n",
+		"          const document = this.documents.get(uri);\n",
+		"          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n",
+		"  }\n",
+		"}\n",
+		"const options = await knip.createOptions({ cwd: this.cwd, isSession: true, args: { config: configFilePath } });\n",
+	);
+
+	#[test]
+	fn managed_patch_adds_editor_workflow_support() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"patched source must contain the editor-workflow marker"
+		);
+		assert!(patched.contains("tsConfig"), "patched source must reference tsConfig");
+		assert!(patched.contains("zedKnip"), "patched source must reference zedKnip");
+		assert!(
+			patched.contains("includeIssueTypes"),
+			"patched source must contain includeIssueTypes filter"
+		);
+		assert!(
+			patched.contains("excludeIssueTypes"),
+			"patched source must contain excludeIssueTypes filter"
+		);
+		assert!(
+			patched.contains("excludePathPrefixes"),
+			"patched source must contain excludePathPrefixes filter"
+		);
+		assert!(
+			patched.contains("severityByIssueType"),
+			"patched source must contain severityByIssueType filter"
+		);
+		assert!(patched.contains("'off'"), "patched source must handle 'off' severity");
+		assert!(
+			patched.contains("diagnostic.severity"),
+			"patched source must override diagnostic.severity based on severityByIssueType"
+		);
+	}
+
+	#[test]
+	#[allow(non_snake_case)]
+	fn managed_patch_passes_tsConfig_relative_unchanged() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains("tsConfig: config.zedKnip.tsConfigFilePath"),
+			"patched source must pass the relative configured tsConfig value unchanged so upstream join(dir, options.tsConfigFile) resolves it"
+		);
+		assert!(
+			!patched.contains("path.resolve(this.cwd"),
+			"patched source must NOT resolve tsConfig to an absolute path; upstream CLI --tsConfig semantics expect a relative value"
+		);
+	}
+
+	#[test]
+	fn managed_patch_severity_overrides_lsp_diagnostic_severity() {
+		let result = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("apply_editor_workflow_patch should not return Err on well-formed source");
+		let patched = result.expect("should return Some for unpatched source");
+
+		assert!(
+			patched.contains("diagnostic.severity = _map[_s]"),
+			"patched source must assign diagnostic.severity from the severity map"
+		);
+		assert!(
+			patched.contains("error: 1, warn: 2, info: 3, hint: 4"),
+			"patched source must map error=1, warn=2, info=3, hint=4 to LSP DiagnosticSeverity"
+		);
+	}
+
+	#[test]
+	fn managed_patch_is_idempotent() {
+		let first = apply_editor_workflow_patch(EDITOR_WORKFLOW_SOURCE)
+			.expect("first application should not error")
+			.expect("first application should return Some");
+
+		let second = apply_editor_workflow_patch(&first).expect("second application should not error");
+
+		assert!(
+			second.is_none(),
+			"second application must return None (idempotent); source already contains editor-workflow marker"
+		);
+	}
+
+	#[test]
+	fn managed_patch_upgrades_old_marker_only() {
+		let source = concat!(
+			"import path from 'node:path';\n",
+			"// zed-knip: refresh Knip diagnostics on textDocument/didSave\n",
+			"// (did-save patch content)\n",
+			"          const document = this.documents.get(uri);\n",
+			"          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n",
+			"args: { config: configFilePath }\n",
+		);
+
+		assert!(
+			source.contains(DID_SAVE_REFRESH_PATCH_MARKER),
+			"test source must contain the did-save marker"
+		);
+		assert!(
+			!source.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"test source must NOT contain the editor-workflow marker"
+		);
+
+		let result =
+			apply_editor_workflow_patch(source).expect("should not error on source with only old did-save marker");
+		let patched = result.expect("should apply editor-workflow patch to old-marker-only source");
+
+		assert!(
+			patched.contains(EDITOR_WORKFLOW_PATCH_MARKER),
+			"upgraded source must contain the editor-workflow marker"
+		);
+		assert!(
+			patched.contains(DID_SAVE_REFRESH_PATCH_MARKER),
+			"upgraded source must still contain the original did-save marker"
+		);
+	}
+
+	#[test]
+	fn managed_patch_reports_missing_editor_anchor() {
+		let source = "// source with no editor-workflow patch anchors\n";
+
+		let result = apply_editor_workflow_patch(source);
+
+		assert!(result.is_err(), "expected Err when a patch anchor is missing");
+		let err = result.unwrap_err();
+		assert!(
+			err.contains("editor-workflow"),
+			"error message must name the editor-workflow anchor; got: {err}"
+		);
+	}
+
+	fn remove_fixture_anchor(anchor: &str) -> String {
+		MANAGED_SERVER_FIXTURE.replacen(anchor, "// removed preprocessor test anchor", 1)
+	}
+
+	#[test]
+	fn managed_preprocessor_fixture_header_records_source_date_and_version() {
+		assert!(
+			MANAGED_SERVER_FIXTURE.starts_with(
+				"/*\n * Source URL: https://raw.githubusercontent.com/webpro-nl/knip/main/packages/language-server/src/server.js\n * Fetch date: 2026-06-10\n * Observed @knip/language-server version: 3.0.3"
+			),
+			"managed server fixture must start with source/date/version header"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_is_idempotent() {
+		let first = apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("first preprocessor patch should not error")
+			.expect("first preprocessor patch should return Some");
+
+		let second = apply_preprocessor_patch(&first).expect("second preprocessor patch should not error");
+		let marker_count = first.matches(PREPROCESSOR_PATCH_MARKER).count();
+
+		assert!(second.is_none(), "second patch application must be idempotent");
+		assert_eq!(
+			marker_count, 1,
+			"patched source must contain exactly one preprocessor marker"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_reports_missing_anchors() {
+		let anchors = [
+			(
+				"helpers",
+				"const RESTART_FOR = new Set(['package.json', ...KNIP_CONFIG_LOCATIONS]);",
+			),
+			(
+				"class state",
+				"  /** @type {Map<string, import('vscode-languageserver').Diagnostic[]>} */\n  cycleDiagnostics = new Map();",
+			),
+			(
+				"start path",
+				"      const session = await knip.createSession(options);\n      this.connection.console.log(`Finished building module graph (${Date.now() - start}ms)`);\n\n      this.session = session;",
+			),
+			(
+				"diagnostic publish path",
+				"      this.publishDiagnostics(this.buildDiagnostics(session.getIssues().issues, config, this.rules));",
+			),
+			(
+				"results path",
+				"  getResults() {\n    if (!this.session) return null;\n    return this.session.getResults();\n  }",
+			),
+			(
+				"file-change path",
+				"      const result = await this.session.handleFileChanges(changes);\n\n      if (!result) return;\n\n      this.connection.console.log(\n        `Module graph updated (${Math.floor(result.duration)}ms • ${(result.mem / 1024 / 1024).toFixed(2)}M)`\n      );\n\n      const config = await this.getConfig();\n      this.publishDiagnostics(this.buildDiagnostics(this.session.getIssues().issues, config, this.rules));",
+			),
+		];
+
+		for (label, anchor) in anchors {
+			let source = remove_fixture_anchor(anchor);
+			let error = apply_preprocessor_patch(&source).unwrap_err();
+			assert_eq!(
+				error,
+				format!("missing preprocessor patch anchor: {label}"),
+				"missing anchor error must name {label}"
+			);
+		}
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_represents_sequential_transforms() {
+		let patched = apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("preprocessor patch should not error")
+			.expect("preprocessor patch should apply");
+
+		assert!(
+			patched.contains("for (const spec of preprocessors)")
+				&& patched.contains("await Promise.resolve(preprocessor(currentReporterOptions))")
+				&& patched.contains("currentReporterOptions = nextReporterOptions"),
+			"patched source must run preprocessors sequentially and await sync/async outputs"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_fail_closed_logic_is_present() {
+		let patched = apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("preprocessor patch should not error")
+			.expect("preprocessor patch should apply");
+
+		assert!(patched.contains("this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT"));
+		assert!(patched.contains("this.zedKnipTransformedIssues = null"));
+		assert!(patched.contains("this.zedKnipTransformedResults = null"));
+		assert!(patched.contains("this.publishDiagnostics(new Map())"));
+		assert!(patched.contains("return null"));
+		assert!(
+			patched.contains("if (preprocessors.length > 0 || this.zedKnipPreprocessorFingerprint === PREPROCESSOR_PATCH_FAILED_FINGERPRINT) return null"),
+			"REQUEST_RESULTS must return null after configured/failing preprocessors instead of raw results"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_defaults_reporter_options() {
+		let patched = apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("preprocessor patch should not error")
+			.expect("preprocessor patch should apply");
+
+		for required_default in [
+			"report: {}",
+			"counters: { processed: 0, total: 0 }",
+			"tagHints: new Set()",
+			"configurationHints: []",
+			"enabledPlugins: {}",
+			"isDisableConfigHints: false",
+			"isDisableTagHints: false",
+			"isTreatConfigHintsAsErrors: false",
+			"isTreatTagHintsAsErrors: false",
+			"isProduction: false",
+			"isShowProgress: false",
+			"options: ''",
+			"includedWorkspaceDirs: []",
+			"selectedWorkspaces: undefined",
+			"maxShowIssues: undefined",
+			"preprocessorOptions: config?.zedKnip?.preprocessorOptions ?? {}",
+		] {
+			assert!(
+				patched.contains(required_default),
+				"missing reporter default {required_default}"
+			);
+		}
+	}
+
+	#[test]
+	fn managed_preprocessor_patch_orchestration_is_all_or_nothing() {
+		let workspace = TestWorkspace::new("preprocessor-all-or-nothing");
+		let package_dir = workspace.root.join("package");
+		let bin_dir = workspace.root.join("bin");
+		fs::create_dir_all(&package_dir).unwrap();
+		fs::create_dir_all(&bin_dir).unwrap();
+		let cli_path = package_dir.join("cli.js");
+		let server_path = package_dir.join("server.js");
+		let executable_path = bin_dir.join("knip-language-server");
+		fs::write(&cli_path, "#!/usr/bin/env node\n").unwrap();
+		symlink(&cli_path, &executable_path).unwrap();
+		let unsupported_source = remove_fixture_anchor(
+			"      this.publishDiagnostics(this.buildDiagnostics(session.getIssues().issues, config, this.rules));",
+		);
+		fs::write(&server_path, &unsupported_source).unwrap();
+
+		let error = patch_managed_language_server(&executable_path).unwrap_err();
+		let after = fs::read_to_string(&server_path).unwrap();
+
+		assert!(
+			matches!(error, KnipError::FailedManagedInstall { reason } if reason.contains("missing preprocessor patch anchor: diagnostic publish path")),
+			"orchestration error must name the missing preprocessor anchor"
+		);
+		assert_eq!(
+			after, unsupported_source,
+			"server.js must remain unchanged after patch-stage failure"
+		);
+	}
+
+	// ============================================================
+	// Task 7: result consistency + settings-change invalidation
+	// ============================================================
+	// These source-level assertions guard the invariants that:
+	//   1. diagnostics and `REQUEST_RESULTS` read from the SAME
+	//      transformed state slot (`zedKnipTransformedIssues` /
+	//      `zedKnipTransformedResults`) so a transformed result can
+	//      never be served from one path while stale on the other,
+	//   2. `start()`, `handleFileChanges()`, and `getResults()` each
+	//      compare the active fingerprint before serving transformed
+	//      state, and on mismatch clear and recompute the state.
+	//
+	// The patched JS is the only place these invariants live, so
+	// pinning the exact text is the only way to keep them honest
+	// against accidental refactors that would split the storage.
+
+	fn patched_preprocessor_source() -> String {
+		apply_preprocessor_patch(MANAGED_SERVER_FIXTURE)
+			.expect("preprocessor patch must not error on pinned fixture")
+			.expect("pinned fixture must be unpatched")
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_diagnostics_use_same_state_as_get_results() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("zedKnipTransformedIssues"),
+			"diagnostic publish path must read from zedKnipTransformedIssues"
+		);
+		assert!(
+			patched.contains("zedKnipTransformedResults"),
+			"getResults() must return zedKnipTransformedResults"
+		);
+		assert!(
+			patched.contains(
+				"this.publishDiagnostics(this.buildDiagnostics(zedKnipDiagnosticsIssues, config, this.rules))"
+			),
+			"diagnostic publish path must route through zedKnipDiagnosticsIssues"
+		);
+		assert!(
+			patched.contains("const zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null\n        ? this.zedKnipTransformedIssues\n        : zedKnipPreprocessorConfig.preprocessors.length > 0\n          ? {}\n          : session.getIssues().issues;"),
+			"diagnostic publish path must read zedKnipTransformedIssues with the empty-object fallback for configured-but-untransformed preprocessors"
+		);
+		assert!(
+			patched.contains("if (this.zedKnipTransformedResults !== null) return this.zedKnipTransformedResults"),
+			"getResults() must return the transformed slot when populated"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_handle_file_changes_uses_same_state() {
+		let patched = patched_preprocessor_source();
+
+		let file_change_block = patched
+			.split("handleFileChanges")
+			.nth(1)
+			.expect("patched source must contain handleFileChanges");
+
+		assert!(
+			file_change_block.contains("this.zedKnipTransformedIssues = output.issues"),
+			"handleFileChanges() must assign output.issues to this.zedKnipTransformedIssues"
+		);
+		assert!(
+			file_change_block.contains("this.zedKnipTransformedResults = output"),
+			"handleFileChanges() must assign output to this.zedKnipTransformedResults"
+		);
+		assert!(
+			file_change_block.contains("this.zedKnipPreprocessorFingerprint = zedKnipPreprocessorConfig.fingerprint"),
+			"handleFileChanges() must record the post-transform fingerprint"
+		);
+		assert!(
+			file_change_block.contains("zedKnipDiagnosticsIssues = this.zedKnipTransformedIssues !== null"),
+			"handleFileChanges() must read transformed issues for its diagnostic publish"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_results_consistency_fail_closed_clears_all_state() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("this.zedKnipPreprocessorFingerprint = PREPROCESSOR_PATCH_FAILED_FINGERPRINT")
+				&& patched.contains("this.zedKnipTransformedIssues = null")
+				&& patched.contains("this.zedKnipTransformedResults = null"),
+			"fail-closed branch must clear fingerprint + transformed issues + transformed results"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_start_path_clears_state_on_each_invocation() {
+		let patched = patched_preprocessor_source();
+
+		let start_block = patched
+			.split("async start()")
+			.nth(1)
+			.expect("patched source must contain start()");
+		assert!(
+			start_block.contains("this.zedKnipPreprocessorFingerprint = null")
+				&& start_block.contains("this.zedKnipTransformedIssues = null")
+				&& start_block.contains("this.zedKnipTransformedResults = null"),
+			"start() must clear fingerprint + transformed state on each invocation"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_handle_file_changes_compares_and_clears() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains("const zedKnipPreprocessorConfig = normalizeZedKnipPreprocessorConfig(config);"),
+			"handleFileChanges() must normalize the active config to derive the fingerprint"
+		);
+		assert!(
+			patched.contains(
+				"if (this.zedKnipPreprocessorFingerprint !== zedKnipPreprocessorConfig.fingerprint) {\n        this.zedKnipPreprocessorFingerprint = null;\n        this.zedKnipTransformedIssues = null;\n        this.zedKnipTransformedResults = null;\n      }"
+			),
+			"handleFileChanges() must clear transformed state when the active fingerprint diverges from the recorded one"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_invalidation_get_results_returns_null_after_mismatch() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains(
+				"const { fingerprint, preprocessors } = normalizeZedKnipPreprocessorConfig(this.initConfig ?? {})"
+			),
+			"getResults() must derive the active fingerprint before reading transformed state"
+		);
+		assert!(
+			patched.contains("if (this.zedKnipPreprocessorFingerprint !== fingerprint) {\n      this.zedKnipTransformedResults = null;\n      this.zedKnipTransformedIssues = null;\n      this.zedKnipPreprocessorFingerprint = fingerprint;\n    }"),
+			"getResults() must clear transformed state and record the active fingerprint when settings changed"
+		);
+		assert!(
+			patched.contains(
+				"if (preprocessors.length > 0 || this.zedKnipPreprocessorFingerprint === PREPROCESSOR_PATCH_FAILED_FINGERPRINT) return null"
+			),
+			"getResults() must return null after a failed-fingerprint sentinel OR when preprocessors are still configured"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_fingerprint_deterministic_string_is_documented_in_patch() {
+		let patched = patched_preprocessor_source();
+
+		assert!(
+			patched.contains(
+				"const fingerprint = typeof zedKnip.preprocessorFingerprint === 'string'\n    ? zedKnip.preprocessorFingerprint\n    : `${preprocessors.join('|')}:${JSON.stringify(Object.fromEntries(Object.entries(preprocessorOptions).sort()))}`"
+			),
+			"normalizeZedKnipPreprocessorConfig() must build the fingerprint from ordered join + sorted option key-value pairs"
+		);
 	}
 }

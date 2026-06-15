@@ -35,7 +35,15 @@ pub fn resolve_knip(
 ) -> Result<ResolvedKnip, KnipError> {
 	let workspace_root = cache.worktree_root.as_path();
 
-	if let Some(explicit_path) = settings.server_path.as_deref() {
+	if settings.requires_managed_patch() && (settings.binary_path.is_some() || !settings.auto_install) {
+		let mut advanced = settings.advanced_settings_list();
+		if settings.binary_path.is_some() && !advanced.contains(&"lsp.knip.binary.path") {
+			advanced.push("lsp.knip.binary.path");
+		}
+		return Err(KnipError::AdvancedSettingsRequireManaged { advanced });
+	}
+
+	if let Some(explicit_path) = settings.binary_path.as_deref() {
 		let executable_path = resolve_configured_path(workspace_root, explicit_path);
 		validate_explicit_path(&executable_path)?;
 		return Ok(ResolvedKnip {
@@ -47,13 +55,15 @@ pub fn resolve_knip(
 
 	let package_manager = resolve_package_manager(settings, cache)?;
 
-	if let Some(executable_path) = workspace_local_language_server(workspace_root) {
-		validate_candidate_path(&executable_path)?;
-		return Ok(ResolvedKnip {
-			executable_path,
-			package_manager,
-			install_source: InstallSource::WorkspaceLocal,
-		});
+	if !settings.requires_managed_patch() {
+		if let Some(executable_path) = workspace_local_language_server(workspace_root) {
+			validate_candidate_path(&executable_path)?;
+			return Ok(ResolvedKnip {
+				executable_path,
+				package_manager,
+				install_source: InstallSource::WorkspaceLocal,
+			});
+		}
 	}
 
 	if let Some(executable_path) = managed_cache_path(cache) {
@@ -83,30 +93,13 @@ pub fn resolve_knip(
 /// Builds the final Zed command used to launch the Knip language server.
 pub fn build_language_server_command(
 	resolved: &ResolvedKnip,
-	settings: &KnipSettings,
+	_settings: &KnipSettings,
 	workspace_root: &Path,
 ) -> KnipLanguageServerCommand {
-	let workspace = workspace_root.display().to_string();
-	let mut args = vec!["--stdio".to_string(), "--cwd".to_string(), workspace.clone()];
-
-	if let Some(config_path) = settings.config_path.as_deref() {
-		args.push("--config".to_string());
-		args.push(
-			resolve_configured_path(workspace_root, config_path)
-				.display()
-				.to_string(),
-		);
-	}
-
 	let command = zed::Command {
 		command: resolved.executable_path.display().to_string(),
-		args,
-		env: vec![
-			("PWD".to_string(), workspace.clone()),
-			("KNIP_WORKSPACE_ROOT".to_string(), workspace),
-			("KNIP_PACKAGE_MANAGER".to_string(), resolved.package_manager.to_string()),
-			("KNIP_LOG_LEVEL".to_string(), settings.log_level.to_string()),
-		],
+		args: vec!["--stdio".to_string()],
+		env: vec![],
 	};
 
 	KnipLanguageServerCommand {
@@ -294,7 +287,7 @@ mod tests {
 		cache.executable_path = Some(cached);
 		cache.install_source = InstallSource::ManagedCache;
 		let settings = KnipSettings {
-			server_path: Some("tools/knip-language-server".to_string()),
+			binary_path: Some("tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -437,7 +430,7 @@ class LanguageServer {
 		);
 		workspace.write(
 			"node_modules/@knip/language-server/src/server.js",
-			"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';\n\nclass LanguageServer {\n  constructor() {\n    this.documents.listen(this.connection);\n    this.connection.listen();\n  }\n\n  onInitialize() {\n    const capabilities = {\n        codeActionProvider: {},\n    };\n    return { capabilities };\n  }\n}\n",
+			"import { FileChangeType, ProposedFeatures, TextDocuments } from 'vscode-languageserver';\n\nclass LanguageServer {\n  constructor() {\n    this.documents.listen(this.connection);\n    this.connection.listen();\n  }\n\n  buildDiagnostics(issues, config, rules) {\n    for (const issue of Object.values(issues)) {\n      for (const uri of Object.keys(issue.files)) {\n          const document = this.documents.get(uri);\n          const diagnostic = issueToDiagnostic(issue, rules, config, document);\n          this.issuesByUri.set(uri, []);\n      }\n    }\n  }\n\n  async resolveConfig() {\n    const configFilePath = config?.configFilePath;\n    const options = await knip.createOptions({ cwd: this.cwd, isSession: true, args: { config: configFilePath } });\n    return options;\n  }\n\n  onInitialize() {\n    const capabilities = {\n        codeActionProvider: {},\n    };\n    return { capabilities };\n  }\n}\n",
 		);
 		let bin_dir = workspace.root.join("node_modules").join(".bin");
 		fs::create_dir_all(&bin_dir).unwrap_or_else(|error| panic!("failed to create {}: {error}", bin_dir.display()));
@@ -459,7 +452,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let invalid = workspace.root.join("missing/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some("missing/knip-language-server".to_string()),
+			binary_path: Some("missing/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -474,7 +467,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let path = workspace.write("tools/knip-language-server", "not executable\n");
 		let settings = KnipSettings {
-			server_path: Some("tools/knip-language-server".to_string()),
+			binary_path: Some("tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -530,7 +523,7 @@ class LanguageServer {
 		let workspace = TestWorkspace::new("command-builder");
 		workspace.package_json("pnpm");
 		let executable = workspace.executable("node_modules/.bin/knip-language-server");
-		let config = workspace.write("knip.json", "{}\n");
+		let _config = workspace.write("knip.json", "{}\n");
 		let settings = KnipSettings {
 			log_level: LogLevel::Debug,
 			config_path: Some("knip.json".to_string()),
@@ -546,28 +539,8 @@ class LanguageServer {
 
 		assert_eq!(command.working_dir, workspace.root);
 		assert_eq!(command.command.command, executable.display().to_string());
-		assert_eq!(
-			command.command.args,
-			vec![
-				"--stdio".to_string(),
-				"--cwd".to_string(),
-				command.working_dir.display().to_string(),
-				"--config".to_string(),
-				config.display().to_string(),
-			]
-		);
-		assert_eq!(
-			command.command.env,
-			vec![
-				("PWD".to_string(), command.working_dir.display().to_string()),
-				(
-					"KNIP_WORKSPACE_ROOT".to_string(),
-					command.working_dir.display().to_string()
-				),
-				("KNIP_PACKAGE_MANAGER".to_string(), "pnpm".to_string()),
-				("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
-			]
-		);
+		assert_eq!(command.command.args, vec!["--stdio".to_string()]);
+		assert!(command.command.env.is_empty());
 	}
 
 	#[test]
@@ -584,7 +557,7 @@ class LanguageServer {
 		let command = build_language_server_command(&resolved, &KnipSettings::default(), &workspace.root);
 
 		assert_eq!(command.command.command, executable.display().to_string());
-		assert!(command.command.args.contains(&workspace.root.display().to_string()));
+		assert_eq!(command.command.args, vec!["--stdio".to_string()]);
 		assert_eq!(command.working_dir, workspace.root);
 	}
 
@@ -602,24 +575,8 @@ class LanguageServer {
 		let command = build_language_server_command(&resolved, &KnipSettings::default(), &workspace.root);
 
 		assert_eq!(command.command.command, executable.display().to_string());
-		assert_eq!(
-			command
-				.command
-				.args
-				.iter()
-				.filter(|arg| arg.as_str() == "--cwd")
-				.count(),
-			1
-		);
-		assert_eq!(
-			command
-				.command
-				.args
-				.iter()
-				.filter(|arg| arg.as_str() == "--stdio")
-				.count(),
-			1
-		);
+		assert_eq!(command.command.args, vec!["--stdio".to_string()]);
+		assert_eq!(command.command.env, vec![]);
 		assert_eq!(command.working_dir, workspace.root);
 	}
 
@@ -645,7 +602,7 @@ class LanguageServer {
 		fs::create_dir_all(&directory)
 			.unwrap_or_else(|error| panic!("failed to create {}: {error}", directory.display()));
 		let settings = KnipSettings {
-			server_path: Some("tools".to_string()),
+			binary_path: Some("tools".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -660,7 +617,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("absolute/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some(explicit.display().to_string()),
+			binary_path: Some(explicit.display().to_string()),
 			..KnipSettings::default()
 		};
 
@@ -722,7 +679,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("tools/knip language server");
 		let settings = KnipSettings {
-			server_path: Some(explicit.display().to_string()),
+			binary_path: Some(explicit.display().to_string()),
 			..KnipSettings::default()
 		};
 
@@ -738,7 +695,7 @@ class LanguageServer {
 		workspace.package_json("npm");
 		let explicit = workspace.executable("my tools/knip-language-server");
 		let settings = KnipSettings {
-			server_path: Some("my tools/knip-language-server".to_string()),
+			binary_path: Some("my tools/knip-language-server".to_string()),
 			..KnipSettings::default()
 		};
 
@@ -767,16 +724,8 @@ class LanguageServer {
 			"workspace root must contain a space for this test"
 		);
 		assert_eq!(command.command.command, executable.display().to_string());
-		assert!(command.command.args.contains(&root_str));
-		assert_eq!(
-			command
-				.command
-				.env
-				.iter()
-				.find(|(k, _)| k == "PWD")
-				.map(|(_, v)| v.as_str()),
-			Some(root_str.as_str())
-		);
+		assert_eq!(command.command.args, vec!["--stdio".to_string()]);
+		assert!(command.command.env.is_empty());
 	}
 
 	#[test]

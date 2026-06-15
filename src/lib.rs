@@ -15,9 +15,12 @@ use crate::{
 	managed_install::ZedNpmManagedInstall,
 	package_manager::PackageManagerError,
 	resolver::{build_language_server_command, resolve_knip},
-	settings::{KnipSettings, LogLevel},
+	settings::{DiagnosticSeverity, KnipDiagnosticsSettings, KnipSettings, KnipSettingsError},
 };
-use std::path::PathBuf;
+use std::{
+	collections::HashMap,
+	path::{Component, PathBuf},
+};
 use zed_extension_api as zed;
 
 const KNIP_LANGUAGE_SERVER_ID: &str = "knip";
@@ -210,7 +213,70 @@ fn knip_workspace_configuration(settings: &KnipSettings) -> zed::serde_json::Val
 		config["configFilePath"] = zed::serde_json::Value::String(config_path.to_string());
 	}
 
+	if settings.requires_managed_patch() {
+		let mut zed_knip = zed::serde_json::json!({
+			"diagnostics": build_diagnostics_json(&settings.diagnostics)
+		});
+		if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
+			zed_knip["tsConfigFilePath"] = zed::serde_json::Value::String(ts_config_path.to_string());
+		}
+
+		{
+			let prep_array: Vec<zed::serde_json::Value> = settings
+				.preprocessor
+				.iter()
+				.map(|s| zed::serde_json::Value::String(s.clone()))
+				.collect();
+			zed_knip["preprocessor"] = zed::serde_json::Value::Array(prep_array);
+
+			let opts_obj = settings
+				.preprocessor_options
+				.as_ref()
+				.map(|opts| {
+					let map: std::collections::BTreeMap<String, zed::serde_json::Value> =
+						opts.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+					zed::serde_json::to_value(map).unwrap_or(zed::serde_json::Value::Object(Default::default()))
+				})
+				.unwrap_or(zed::serde_json::Value::Object(Default::default()));
+			zed_knip["preprocessorOptions"] = opts_obj;
+
+			let prep_fingerprint = if settings.preprocessor.is_empty() {
+				String::new()
+			} else {
+				let prepjoined = settings.preprocessor.join("|");
+				let opts_fingerprint = settings
+					.preprocessor_options
+					.as_ref()
+					.map(|opts| {
+						let sorted: std::collections::BTreeMap<String, &zed::serde_json::Value> =
+							opts.iter().map(|(k, v)| (k.clone(), v)).collect();
+						zed::serde_json::to_string(&sorted).unwrap_or_default()
+					})
+					.unwrap_or_default();
+				format!("{}:{}", prepjoined, opts_fingerprint)
+			};
+			zed_knip["preprocessorFingerprint"] = zed::serde_json::Value::String(prep_fingerprint);
+		}
+
+		config["zedKnip"] = zed_knip;
+	}
+
 	config
+}
+
+fn build_diagnostics_json(diag: &KnipDiagnosticsSettings) -> zed::serde_json::Value {
+	let severity_map: std::collections::BTreeMap<String, String> = diag
+		.severity_by_issue_type
+		.iter()
+		.map(|(k, v)| (k.clone(), v.to_string()))
+		.collect();
+
+	zed::serde_json::json!({
+		"includeIssueTypes": diag.include_issue_types,
+		"excludeIssueTypes": diag.exclude_issue_types,
+		"excludePathPrefixes": diag.exclude_path_prefixes,
+		"severityByIssueType": severity_map
+	})
 }
 
 fn settings_for_worktree(
@@ -224,8 +290,23 @@ fn settings_for_worktree(
 
 	let workspace_root = worktree.root_path();
 	if settings.config_path.is_none() {
-		settings.config_path = detect_config_for_worktree(worktree)
-			.map(|relative_path| workspace_root.join(relative_path).display().to_string());
+		settings.config_path = detect_config_for_worktree(worktree).map(|s| s.to_string());
+	}
+
+	if settings.require_config && settings.config_path.is_none() {
+		return Err(KnipError::RequireConfigMissing {
+			workspace_root: workspace_root.clone(),
+		}
+		.to_string());
+	}
+
+	if let Some(config_path) = settings.config_path.as_deref() {
+		let resolved = validate_config_path(config_path, worktree).map_err(|error| error.to_string())?;
+		settings.config_path = Some(resolved.display().to_string());
+	}
+
+	if let Some(ts_config_path) = settings.ts_config_path.as_deref() {
+		validate_ts_config_path(ts_config_path, worktree)?;
 	}
 
 	if settings.package_manager.is_none() {
@@ -233,7 +314,108 @@ fn settings_for_worktree(
 	}
 
 	settings.validate().map_err(|error| error.to_string())?;
+	validate_workspace_local_preprocessors(&settings.preprocessor)?;
 	Ok(settings)
+}
+
+fn validate_workspace_local_preprocessors(preprocessors: &[String]) -> zed::Result<()> {
+	for spec in preprocessors {
+		if !spec.starts_with("./") {
+			continue;
+		}
+
+		let mut depth = 0_usize;
+		for component in std::path::Path::new(spec).components() {
+			match component {
+				Component::CurDir => {}
+				Component::Normal(_) => depth += 1,
+				Component::ParentDir if depth > 0 => depth -= 1,
+				Component::ParentDir => {
+					return Err(format!("preprocessor specifier '{}' escapes the workspace root", spec));
+				}
+				_ => {
+					return Err(format!("preprocessor specifier '{}' escapes the workspace root", spec));
+				}
+			}
+		}
+	}
+
+	Ok(())
+}
+
+fn validate_config_path(config_path: &str, worktree: &impl WorktreeAdapter) -> Result<PathBuf, KnipError> {
+	let workspace_root = worktree.root_path();
+	let path = std::path::Path::new(config_path);
+	let resolved = if path.is_absolute() {
+		path.to_path_buf()
+	} else {
+		workspace_root.join(path)
+	};
+
+	// Compute a workspace-relative path for the sandbox-safe read_text_file check.
+	// If the resolved path is under workspace_root, strip the prefix so read_text_file
+	// gets a relative path. Otherwise (absolute path outside workspace), fall back to
+	// the absolute path string — worktree.read_text_file on an absolute path outside the
+	// workspace will return None, which is the correct outcome for a non-existent file.
+	let relative_for_read = if resolved.starts_with(&workspace_root) {
+		resolved.strip_prefix(&workspace_root).unwrap_or(&resolved).as_os_str()
+	} else {
+		resolved.as_os_str()
+	};
+
+	if worktree
+		.read_text_file(relative_for_read.to_str().unwrap_or(config_path))
+		.is_none()
+	{
+		return Err(KnipError::InvalidConfig {
+			path: resolved.clone(),
+			reason: format!(
+				"lsp.knip.settings.config_path points at {} but no file exists at that path",
+				resolved.display()
+			),
+		});
+	}
+
+	Ok(resolved)
+}
+
+fn validate_ts_config_path(ts_config_path: &str, worktree: &impl WorktreeAdapter) -> zed::Result<()> {
+	if ts_config_path.is_empty() {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: PathBuf::from(""),
+			reason: "path cannot be empty".to_string(),
+		}
+		.to_string());
+	}
+
+	let path = std::path::Path::new(ts_config_path);
+
+	if path.is_absolute() {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: "path must be relative to the workspace root, not absolute".to_string(),
+		}
+		.to_string());
+	}
+
+	if path.components().any(|c| c == Component::ParentDir) {
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: "path must not contain '..' parent directory traversal".to_string(),
+		}
+		.to_string());
+	}
+
+	if worktree.read_text_file(ts_config_path).is_none() {
+		let full_path = worktree.root_path().join(path);
+		return Err(KnipError::InvalidTsConfigPath {
+			path: path.to_path_buf(),
+			reason: format!("file not found at {}", full_path.display()),
+		}
+		.to_string());
+	}
+
+	Ok(())
 }
 
 fn detect_config_for_worktree(worktree: &impl WorktreeAdapter) -> Option<&'static str> {
@@ -276,15 +458,12 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 	let mut overrides = KnipSettings::default();
 
 	if let Some(binary) = settings.binary {
-		overrides.server_path = binary.path;
+		overrides.binary_path = binary.path;
 		if let Some(arguments) = binary.arguments {
 			reject_binary_arguments(&arguments)?;
 		}
-		if let Some(env) = binary.env {
-			overrides.package_manager = env.get("KNIP_PACKAGE_MANAGER").cloned();
-			if let Some(log_level) = env.get("KNIP_LOG_LEVEL") {
-				overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
-			}
+		if let Some(env) = binary.env.as_ref() {
+			reject_binary_env_settings(env)?;
 		}
 	}
 
@@ -296,19 +475,25 @@ fn settings_from_lsp_settings(settings: zed::settings::LspSettings) -> zed::Resu
 }
 
 fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde_json::Value) -> zed::Result<()> {
-	if let Some(server_path) = settings
-		.get("server_path")
-		.cloned()
-		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
-	{
-		overrides.server_path = Some(server_path);
+	// Reject removed settings before processing anything else.
+	const REMOVED: &[(&str, &str)] = &[
+		("server_path", "lsp.knip.binary.path"),
+		("log_level", "the Knip config file (configure log verbosity there)"),
+		("package_manager", "the packageManager field in package.json"),
+	];
+	for &(name, replacement) in REMOVED {
+		if settings.get(name).is_some() {
+			return Err(KnipSettingsError::RemovedSetting { name, replacement }.to_string());
+		}
 	}
-	if let Some(package_manager) = settings
-		.get("package_manager")
+
+	// Map supported settings.
+	if let Some(binary_path) = settings
+		.get("binary_path")
 		.cloned()
 		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
 	{
-		overrides.package_manager = Some(package_manager);
+		overrides.binary_path = Some(binary_path);
 	}
 	if let Some(auto_install) = settings
 		.get("auto_install")
@@ -316,13 +501,6 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 		.and_then(|value| zed::serde_json::from_value::<bool>(value).ok())
 	{
 		overrides.auto_install = auto_install;
-	}
-	if let Some(log_level) = settings
-		.get("log_level")
-		.cloned()
-		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
-	{
-		overrides.log_level = log_level.parse::<LogLevel>().map_err(|error| error.to_string())?;
 	}
 	if let Some(config_path) = settings
 		.get("config_path")
@@ -338,7 +516,56 @@ fn apply_custom_lsp_settings(overrides: &mut KnipSettings, settings: &zed::serde
 	{
 		overrides.require_config = require_config;
 	}
+	if let Some(ts_config_path) = settings
+		.get("ts_config_path")
+		.cloned()
+		.and_then(|value| zed::serde_json::from_value::<String>(value).ok())
+	{
+		overrides.ts_config_path = Some(ts_config_path);
+	}
+	if let Some(diag_value) = settings.get("diagnostics") {
+		overrides.diagnostics = parse_diagnostics_settings(diag_value)?;
+	}
+	if let Some(prep_value) = settings.get("preprocessor") {
+		let preprocessors: Vec<String> = zed::serde_json::from_value(prep_value.clone())
+			.map_err(|e| format!("invalid preprocessor setting: {}", e))?;
+		overrides.preprocessor = preprocessors;
+	}
+	if let Some(opts_value) = settings.get("preprocessor_options") {
+		let opts: Option<std::collections::BTreeMap<String, zed::serde_json::Value>> =
+			zed::serde_json::from_value(opts_value.clone())
+				.map_err(|e| format!("invalid preprocessor_options setting: {}", e))?;
+		overrides.preprocessor_options = opts;
+	}
+
 	Ok(())
+}
+
+fn parse_diagnostics_settings(value: &zed::serde_json::Value) -> zed::Result<KnipDiagnosticsSettings> {
+	let mut diag = KnipDiagnosticsSettings::default();
+
+	if let Some(obj) = value.as_object() {
+		if let Some(include) = obj.get("include_issue_types").and_then(|v| v.as_array()) {
+			diag.include_issue_types = include.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(exclude) = obj.get("exclude_issue_types").and_then(|v| v.as_array()) {
+			diag.exclude_issue_types = exclude.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(prefixes) = obj.get("exclude_path_prefixes").and_then(|v| v.as_array()) {
+			diag.exclude_path_prefixes = prefixes.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+		}
+		if let Some(severity_map) = obj.get("severity_by_issue_type").and_then(|v| v.as_object()) {
+			for (issue_type, severity_value) in severity_map {
+				if let Some(severity_str) = severity_value.as_str() {
+					let severity =
+						DiagnosticSeverity::parse_with_type(issue_type, severity_str).map_err(|e| e.to_string())?;
+					diag.severity_by_issue_type.insert(issue_type.clone(), severity);
+				}
+			}
+		}
+	}
+
+	Ok(diag)
 }
 
 fn reject_binary_arguments(arguments: &[String]) -> zed::Result<()> {
@@ -354,6 +581,21 @@ fn reject_binary_arguments(arguments: &[String]) -> zed::Result<()> {
 			.collect::<Vec<_>>()
 			.join(", ")
 	))
+}
+
+fn reject_binary_env_settings(env: &HashMap<String, String>) -> zed::Result<()> {
+	const REMOVED_ENV_KEYS: &[(&str, &str)] = &[
+		("KNIP_LOG_LEVEL", "lsp.knip.settings.log_level"),
+		("KNIP_PACKAGE_MANAGER", "the packageManager field in package.json"),
+	];
+
+	for (name, replacement) in REMOVED_ENV_KEYS {
+		if env.contains_key(*name) {
+			return Err(KnipSettingsError::RemovedEnvSetting { name, replacement }.to_string());
+		}
+	}
+
+	Ok(())
 }
 
 fn unsupported_language_server_error(language_server_id: &str) -> String {
@@ -376,6 +618,11 @@ const MODULE_COUNT: usize = 9;
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::{
+		cache::InstallSource,
+		managed_install::{ManagedInstall, ManagedInstallDisabled},
+		package_manager::PackageManager,
+	};
 	use std::{
 		collections::HashMap,
 		fs,
@@ -386,6 +633,7 @@ mod tests {
 	#[derive(Debug)]
 	struct TestWorktree {
 		root: PathBuf,
+		settings_override: Option<KnipSettings>,
 	}
 
 	impl TestWorktree {
@@ -396,7 +644,15 @@ mod tests {
 				.as_nanos();
 			let root = std::env::temp_dir().join(format!("zed-knip-lib-{name}-{nanos}"));
 			fs::create_dir_all(&root).unwrap_or_else(|error| panic!("failed to create {}: {error}", root.display()));
-			Self { root }
+			Self {
+				root,
+				settings_override: None,
+			}
+		}
+
+		fn with_settings_override(mut self, settings: KnipSettings) -> Self {
+			self.settings_override = Some(settings);
+			self
 		}
 
 		fn write(&self, relative_path: &str, contents: &str) -> PathBuf {
@@ -422,7 +678,7 @@ mod tests {
 		}
 
 		fn lsp_settings(&self, _language_server_id: &str) -> zed::Result<Option<KnipSettings>> {
-			Ok(None)
+			Ok(self.settings_override.clone())
 		}
 
 		fn read_text_file(&self, relative_path: &str) -> Option<String> {
@@ -479,18 +735,17 @@ mod tests {
 			binary: Some(zed::settings::CommandSettings {
 				path: Some("tools/knip-language-server".to_string()),
 				arguments: None,
-				env: Some(HashMap::from([
-					("KNIP_PACKAGE_MANAGER".to_string(), "npm".to_string()),
-					("KNIP_LOG_LEVEL".to_string(), "debug".to_string()),
-				])),
+				env: Some(HashMap::from([(
+					"UNRELATED_ENV_VAR".to_string(),
+					"ignored".to_string(),
+				)])),
 			}),
 			initialization_options: None,
 			settings: Some(zed::serde_json::json!({
-				"package_manager": "pnpm",
 				"auto_install": false,
-				"log_level": "warn",
 				"config_path": "knip.ts",
-				"require_config": true
+				"require_config": true,
+				"ts_config_path": "tsconfig.app.json"
 			})),
 		})
 		.unwrap();
@@ -498,14 +753,74 @@ mod tests {
 		assert_eq!(
 			settings,
 			KnipSettings {
-				server_path: Some("tools/knip-language-server".to_string()),
-				package_manager: Some("pnpm".to_string()),
+				binary_path: Some("tools/knip-language-server".to_string()),
 				auto_install: false,
-				log_level: LogLevel::Warn,
 				config_path: Some("knip.ts".to_string()),
 				require_config: true,
+				ts_config_path: Some("tsconfig.app.json".to_string()),
+				diagnostics: KnipDiagnosticsSettings::default(),
+				..KnipSettings::default()
 			}
 		);
+	}
+
+	#[test]
+	fn settings_reject_removed_env_settings() {
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: None,
+				env: Some(HashMap::from([("KNIP_LOG_LEVEL".to_string(), "info".to_string())])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("KNIP_LOG_LEVEL"),
+			"error must name the removed env key 'KNIP_LOG_LEVEL', got: {err}"
+		);
+		assert!(
+			err.contains("removed") || err.to_lowercase().contains("env"),
+			"error must describe the env-based setting as removed, got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: None,
+				env: Some(HashMap::from([(
+					"KNIP_PACKAGE_MANAGER".to_string(),
+					"pnpm".to_string(),
+				)])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("KNIP_PACKAGE_MANAGER"),
+			"error must name the removed env key 'KNIP_PACKAGE_MANAGER', got: {err}"
+		);
+	}
+
+	#[test]
+	fn lsp_settings_accept_unrelated_binary_env_entries() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: Some("tools/knip-language-server".to_string()),
+				arguments: None,
+				env: Some(HashMap::from([
+					("PATH".to_string(), "/usr/bin".to_string()),
+					("MY_TOOL_FLAG".to_string(), "true".to_string()),
+				])),
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap();
+
+		assert_eq!(settings.binary_path.as_deref(), Some("tools/knip-language-server"));
 	}
 
 	#[test]
@@ -567,20 +882,14 @@ mod tests {
 		let worktree = TestWorktree::new("command");
 		worktree.write("package.json", "{\"packageManager\":\"pnpm@9.0.0\"}\n");
 		let executable = worktree.executable("node_modules/.bin/knip-language-server");
-		let config = worktree.write("knip.json", "{}\n");
+		worktree.write("knip.json", "{}\n");
 
 		let command =
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert_eq!(command.args[0], "--stdio");
-		assert!(command.args.contains(&"--cwd".to_string()));
-		assert!(command.args.contains(&worktree.root.display().to_string()));
-		assert!(command.args.contains(&"--config".to_string()));
-		assert!(command.args.contains(&config.display().to_string()));
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "pnpm".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]
@@ -593,9 +902,8 @@ mod tests {
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "bun".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]
@@ -609,9 +917,8 @@ mod tests {
 			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
 
 		assert_eq!(command.command, executable.display().to_string());
-		assert!(command
-			.env
-			.contains(&("KNIP_PACKAGE_MANAGER".to_string(), "aube".to_string())));
+		assert_eq!(command.args, vec!["--stdio".to_string()]);
+		assert!(command.env.is_empty());
 	}
 
 	#[test]
@@ -647,6 +954,21 @@ mod tests {
 		);
 		assert_eq!(options["cwd"].as_str(), Some(expected_cwd.as_str()));
 		assert_eq!(options["config"]["editor"]["exports"]["quickfix"]["enabled"], true);
+
+		let config_file_path_str = options["config"]["configFilePath"].as_str().unwrap();
+		assert!(
+			Path::new(config_file_path_str).is_absolute(),
+			"configFilePath must be an absolute path, got: {config_file_path_str}"
+		);
+		let cwd_str = options["cwd"].as_str().unwrap();
+		assert!(
+			Path::new(cwd_str).is_absolute(),
+			"cwd must be an absolute path, got: {cwd_str}"
+		);
+		assert!(
+			options["config"].get("zedKnip").is_none(),
+			"config must not contain 'zedKnip' key for baseline settings"
+		);
 	}
 
 	#[test]
@@ -680,5 +1002,677 @@ mod tests {
 		let error = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap_err();
 
 		assert!(error.contains("This workspace is not supported: missing package.json"));
+	}
+
+	#[test]
+	fn language_server_command_uses_stdio_only() {
+		let worktree = TestWorktree::new("stdio-only");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio']; workspace and config paths are initialization options, not launch args"
+		);
+		assert!(
+			command.env.is_empty(),
+			"env must be empty; cwd/config/package-manager are initialization options, not env vars"
+		);
+	}
+
+	#[test]
+	fn language_server_command_rejects_non_transport_arguments() {
+		let error = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: Some(zed::settings::CommandSettings {
+				path: None,
+				arguments: Some(vec!["--tsConfig".to_string(), "tsconfig.app.json".to_string()]),
+				env: None,
+			}),
+			initialization_options: None,
+			settings: None,
+		})
+		.unwrap_err();
+
+		assert!(
+			error.contains("--tsConfig"),
+			"rejection error must name the unsupported argument '--tsConfig', got: {error}"
+		);
+		assert!(
+			error.contains("`lsp.knip.binary.arguments` is not supported"),
+			"rejection error must name the unsupported config key, got: {error}"
+		);
+	}
+
+	#[test]
+	fn language_server_configuration_includes_zed_knip_advanced_settings() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"ts_config_path": "tsconfig.app.json",
+				"diagnostics": { "include": ["exports"] }
+			})),
+		})
+		.unwrap();
+
+		let workspace_root = std::path::Path::new("/workspace");
+		let config = knip_workspace_configuration(&settings);
+		let init_options = knip_initialization_options(&settings, workspace_root);
+
+		assert_eq!(
+			config["zedKnip"]["tsConfigFilePath"].as_str(),
+			Some("tsconfig.app.json"),
+			"workspace configuration must include zedKnip.tsConfigFilePath"
+		);
+		assert!(
+			config["zedKnip"]["diagnostics"].is_object(),
+			"workspace configuration must include zedKnip.diagnostics object"
+		);
+		assert_eq!(
+			init_options["config"]["zedKnip"]["tsConfigFilePath"].as_str(),
+			Some("tsconfig.app.json"),
+			"initialization options must include config.zedKnip.tsConfigFilePath"
+		);
+	}
+
+	#[test]
+	fn settings_reject_removed_noop_settings() {
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"server_path": "x"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("server_path"),
+			"error must name the removed key 'server_path', got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"log_level": "info"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("log_level"),
+			"error must name the removed key 'log_level', got: {err}"
+		);
+
+		let err = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({"package_manager": "npm"})),
+		})
+		.unwrap_err();
+		assert!(
+			err.contains("package_manager"),
+			"error must name the removed key 'package_manager', got: {err}"
+		);
+	}
+
+	#[derive(Debug, Clone)]
+	struct MockManagedInstall {
+		path: PathBuf,
+	}
+
+	impl ManagedInstall for MockManagedInstall {
+		fn install(&self, _root: &Path, _pm: PackageManager) -> Result<PathBuf, KnipError> {
+			Ok(self.path.clone())
+		}
+	}
+
+	#[test]
+	fn require_config_blocks_workspace_without_knip_config() {
+		let worktree = TestWorktree::new("require-config-missing");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			require_config: true,
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("require_config"),
+			"error must mention require_config, got: {error}"
+		);
+	}
+
+	#[test]
+	fn settings_reject_missing_explicit_config_path() {
+		let worktree = TestWorktree::new("config-path-missing");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			config_path: Some("missing/knip.json".to_string()),
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+		let expected = worktree.root.join("missing/knip.json").display().to_string();
+
+		assert!(
+			error.contains(&expected),
+			"error must mention the resolved path '{expected}', got: {error}"
+		);
+		assert!(
+			error.contains("config_path") || error.to_lowercase().contains("config"),
+			"error must mention the config_path setting, got: {error}"
+		);
+	}
+
+	#[test]
+	fn advanced_settings_reject_custom_language_server_path() {
+		let worktree = TestWorktree::new("advanced-custom-path");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/knip".to_string()),
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let error = resolve_knip(&settings, &cache, &ManagedInstallDisabled).unwrap_err();
+		let message = error.to_string();
+
+		assert!(
+			message.contains("managed"),
+			"error must mention managed install, got: {message}"
+		);
+		assert!(
+			message.contains("binary.path"),
+			"error must mention binary.path, got: {message}"
+		);
+	}
+
+	#[test]
+	fn advanced_settings_force_managed_install() {
+		let worktree = TestWorktree::new("advanced-force-managed");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+		worktree.executable("node_modules/.bin/knip-language-server");
+		let managed = worktree.executable("managed/knip-language-server");
+
+		let settings = KnipSettings {
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let installer = MockManagedInstall { path: managed.clone() };
+		let resolved = resolve_knip(&settings, &cache, &installer).unwrap();
+
+		assert_eq!(
+			resolved.executable_path, managed,
+			"resolver must use managed install, not workspace-local, when requires_managed_patch"
+		);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
+	}
+
+	#[test]
+	fn ts_config_path_rejects_absolute_or_parent_paths() {
+		let worktree = TestWorktree::new("ts-config-path-invalid");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings_absolute = Some(KnipSettings {
+			ts_config_path: Some("/etc/passwd".to_string()),
+			..KnipSettings::default()
+		});
+		let error = settings_for_worktree(&worktree, settings_absolute).unwrap_err();
+		assert!(
+			error.contains("ts_config_path"),
+			"error for absolute path must mention ts_config_path, got: {error}"
+		);
+
+		let settings_parent = Some(KnipSettings {
+			ts_config_path: Some("../escape.json".to_string()),
+			..KnipSettings::default()
+		});
+		let error = settings_for_worktree(&worktree, settings_parent).unwrap_err();
+		assert!(
+			error.contains("ts_config_path") || error.contains(".."),
+			"error for parent traversal must mention ts_config_path or '..', got: {error}"
+		);
+	}
+
+	#[test]
+	fn ts_config_path_rejects_missing_file() {
+		let worktree = TestWorktree::new("ts-config-path-missing-file");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			ts_config_path: Some("missing/tsconfig.app.json".to_string()),
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("ts_config_path"),
+			"error must mention ts_config_path, got: {error}"
+		);
+		let expected = worktree.root.join("missing/tsconfig.app.json").display().to_string();
+		assert!(
+			error.contains(&expected),
+			"error must mention the resolved path '{expected}', got: {error}"
+		);
+		assert!(
+			error.contains("file not found") || error.contains("not found"),
+			"error must explain the file is missing, got: {error}"
+		);
+	}
+
+	#[test]
+	fn preprocessor_settings_reject_path_escape_via_dotdot_in_dot_path() {
+		let worktree = TestWorktree::new("preprocessor-dotdot-escape");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			preprocessor: vec!["./../escape.js".to_string()],
+			..KnipSettings::default()
+		});
+
+		let error = settings_for_worktree(&worktree, settings).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor") && error.contains("escapes the workspace root"),
+			"error must reject workspace-root escape, got: {error}"
+		);
+	}
+
+	#[test]
+	fn preprocessor_settings_accept_workspace_local_path() {
+		let worktree = TestWorktree::new("preprocessor-local-path");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+
+		let settings = Some(KnipSettings {
+			preprocessor: vec!["./local.js".to_string()],
+			..KnipSettings::default()
+		});
+
+		let resolved = settings_for_worktree(&worktree, settings).unwrap();
+
+		assert_eq!(resolved.preprocessor, vec!["./local.js".to_string()]);
+	}
+
+	#[test]
+	fn custom_binary_path_supports_baseline_stdio_launch() {
+		let worktree = TestWorktree::new("custom-baseline-stdio");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		let custom_binary = worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let command =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap();
+
+		assert_eq!(
+			command.command,
+			custom_binary.display().to_string(),
+			"custom binary.path must be used when no advanced setting is enabled"
+		);
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio'] for a baseline custom binary"
+		);
+		assert!(command.env.is_empty(), "env must be empty for a baseline custom binary");
+	}
+
+	#[test]
+	fn custom_binary_rejects_ts_config_path() {
+		let worktree = TestWorktree::new("custom-rejects-ts-config");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("tsconfig.json", "{}");
+		worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			ts_config_path: Some("tsconfig.json".to_string()),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("ts_config_path"),
+			"error must mention ts_config_path, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn preprocessor_configuration_emits_array_in_order() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["./tools/prep1.mjs", "prep-package", "@scope/prep2"]
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		let prep_array = config["zedKnip"]["preprocessor"].as_array().unwrap();
+		assert_eq!(prep_array.len(), 3, "preprocessor array must have 3 entries");
+		assert_eq!(prep_array[0].as_str(), Some("./tools/prep1.mjs"));
+		assert_eq!(prep_array[1].as_str(), Some("prep-package"));
+		assert_eq!(prep_array[2].as_str(), Some("@scope/prep2"));
+	}
+
+	#[test]
+	fn preprocessor_options_serialized_as_object() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": {
+					"key1": "value1",
+					"key2": 42
+				}
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		let opts_obj = config["zedKnip"]["preprocessorOptions"].as_object().unwrap();
+		assert_eq!(opts_obj.get("key1").map(|v| v.as_str()), Some(Some("value1")));
+		assert_eq!(opts_obj.get("key2").map(|v| v.as_i64()), Some(Some(42)));
+	}
+
+	#[test]
+	fn preprocessor_options_default_to_empty_object() {
+		let settings = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"]
+			})),
+		})
+		.unwrap();
+
+		let config = knip_workspace_configuration(&settings);
+
+		assert!(
+			config["zedKnip"]["preprocessorOptions"].is_object(),
+			"preprocessorOptions must be an object even when not configured"
+		);
+		let opts_obj = config["zedKnip"]["preprocessorOptions"].as_object().unwrap();
+		assert!(
+			opts_obj.is_empty(),
+			"preprocessorOptions must be empty object when not configured"
+		);
+	}
+
+	#[test]
+	fn preprocessor_fingerprint_changes_with_list_order_and_options() {
+		let settings1 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["a", "b"]
+			})),
+		})
+		.unwrap();
+		let config1 = knip_workspace_configuration(&settings1);
+		let fp1 = config1["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		let settings2 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["b", "a"]
+			})),
+		})
+		.unwrap();
+		let config2 = knip_workspace_configuration(&settings2);
+		let fp2 = config2["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp2,
+			"fingerprint must change when preprocessor order changes: {} vs {}",
+			fp1, fp2
+		);
+
+		let settings3 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["a", "b"],
+				"preprocessor_options": { "opt": "val" }
+			})),
+		})
+		.unwrap();
+		let config3 = knip_workspace_configuration(&settings3);
+		let fp3 = config3["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp3,
+			"fingerprint must change when options are added: {} vs {}",
+			fp1, fp3
+		);
+		assert_eq!(
+			fp3, "a|b:{\"opt\":\"val\"}",
+			"fingerprint must serialize sorted option key-value pairs"
+		);
+	}
+
+	#[test]
+	fn preprocessor_fingerprint_changes_when_option_values_differ() {
+		let settings1 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": { "a": 1 }
+			})),
+		})
+		.unwrap();
+		let config1 = knip_workspace_configuration(&settings1);
+		let fp1 = config1["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		let settings2 = settings_from_lsp_settings(zed::settings::LspSettings {
+			binary: None,
+			initialization_options: None,
+			settings: Some(zed::serde_json::json!({
+				"preprocessor": ["prep"],
+				"preprocessor_options": { "a": 2 }
+			})),
+		})
+		.unwrap();
+		let config2 = knip_workspace_configuration(&settings2);
+		let fp2 = config2["zedKnip"]["preprocessorFingerprint"].as_str().unwrap();
+
+		assert_ne!(
+			fp1, fp2,
+			"fingerprint must change when option values differ: {} vs {}",
+			fp1, fp2
+		);
+		assert_eq!(fp1, "prep:{\"a\":1}");
+		assert_eq!(fp2, "prep:{\"a\":2}");
+	}
+
+	#[test]
+	fn preprocessor_hard_launch_preserves_stdio_args_and_empty_env() {
+		let worktree = TestWorktree::new("preprocessor-stdio-launch");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.write("knip.json", "{}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+
+		let settings = KnipSettings {
+			preprocessor: vec!["./tools/prep.mjs".to_string()],
+			preprocessor_options: Some(std::collections::BTreeMap::from([(
+				"key".to_string(),
+				zed::serde_json::json!("value"),
+			)])),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let fake_command = zed::Command {
+			command: worktree.root.join("managed/knip-language-server").display().to_string(),
+			args: vec!["--stdio".to_string()],
+			env: vec![],
+		};
+		let resolver = MockResolver {
+			result: Ok(fake_command),
+		};
+
+		let command = language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &resolver).unwrap();
+
+		assert_eq!(
+			command.args,
+			vec!["--stdio".to_string()],
+			"args must be exactly ['--stdio']; preprocessors flow through LSP config, not CLI args"
+		);
+		assert!(
+			command.env.is_empty(),
+			"env must be empty; preprocessor config flows through LSP initialization options"
+		);
+	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["echo".to_string(), "setup".to_string()],
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor"),
+			"error must mention preprocessor, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor_options() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor-options");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		use std::collections::BTreeMap;
+		let mut opts = BTreeMap::new();
+		opts.insert("verbose".to_string(), zed::serde_json::Value::Bool(true));
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["./local-preprocessor".to_string()],
+			preprocessor_options: Some(opts),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor_options"),
+			"error must mention preprocessor_options, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+		assert!(
+			error.contains("binary.path"),
+			"error must mention binary.path, got: {error}"
+		);
+	}
+
+	#[test]
+	fn custom_binary_rejects_preprocessor_and_options() {
+		let worktree = TestWorktree::new("custom-rejects-preprocessor-both");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("tools/custom-knip-language-server");
+
+		use std::collections::BTreeMap;
+		let mut opts = BTreeMap::new();
+		opts.insert("verbose".to_string(), zed::serde_json::Value::Bool(false));
+
+		let settings = KnipSettings {
+			binary_path: Some("tools/custom-knip-language-server".to_string()),
+			preprocessor: vec!["echo".to_string()],
+			preprocessor_options: Some(opts),
+			..KnipSettings::default()
+		};
+		let worktree = worktree.with_settings_override(settings);
+
+		let error =
+			language_server_command_for_worktree(KNIP_LANGUAGE_SERVER_ID, &worktree, &ProductionResolver).unwrap_err();
+
+		assert!(
+			error.contains("preprocessor") && error.contains("preprocessor_options"),
+			"error must mention both preprocessor settings, got: {error}"
+		);
+		assert!(
+			error.contains("managed install"),
+			"error must mention managed install, got: {error}"
+		);
+	}
+
+	#[test]
+	fn managed_preprocessor_auto_install_works() {
+		let worktree = TestWorktree::new("managed-preprocessor-works");
+		worktree.write("package.json", "{\"packageManager\":\"npm@10.0.0\"}\n");
+		worktree.executable("node_modules/.bin/knip-language-server");
+		let managed = worktree.executable("managed/knip-language-server");
+
+		let settings = KnipSettings {
+			preprocessor: vec!["echo".to_string()],
+			..KnipSettings::default()
+		};
+
+		let cache = WorktreeCache::new(worktree.root.clone());
+		let installer = MockManagedInstall { path: managed.clone() };
+		let resolved = resolve_knip(&settings, &cache, &installer).unwrap();
+
+		assert_eq!(
+			resolved.executable_path, managed,
+			"resolver must use managed install when preprocessor is configured without custom binary"
+		);
+		assert_eq!(resolved.install_source, InstallSource::ManagedCache);
 	}
 }

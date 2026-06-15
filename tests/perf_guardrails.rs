@@ -95,22 +95,6 @@ fn perf_no_background_polling_or_watcher_code_paths_exist() {
 	}
 }
 
-#[test]
-fn perf_command_builder_documents_single_language_server_process_per_worktree() {
-	assert!(
-		RESOLVER_SOURCE.contains("build_language_server_command"),
-		"resolver must keep command construction centralized"
-	);
-	assert!(
-		RESOLVER_SOURCE.contains("--cwd"),
-		"command builder must pass one worktree cwd instead of per-file launches"
-	);
-	assert!(
-		RESOLVER_SOURCE.contains("KNIP_WORKSPACE_ROOT"),
-		"command builder must carry one worktree root in process env"
-	);
-}
-
 fn assert_no_recursive_scan_apis(path: &str, source: &str) {
 	for api in FILE_SCAN_APIS {
 		assert!(
